@@ -1,0 +1,93 @@
+version: "3.8"
+
+services:
+
+  ad-cnas:
+    image: ubuntu:22.04
+    container_name: AD-CNAS-KOLEA
+    hostname: AD-CNAS-KOLEA
+    restart: unless-stopped
+    volumes:
+      - ./scripts/ad_telemetry.sh:/telemetry.sh:ro
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq netcat-openbsd cron &&
+        chmod +x /telemetry.sh &&
+        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
+        cron -f &
+        sleep 10 &&
+        /telemetry.sh logstash01 514 &&
+        tail -f /var/log/telemetry.log
+      "
+    networks:
+      - cnas-net
+
+  wsus-cnas:
+    image: ubuntu:22.04
+    container_name: WSUS-CNAS-KOLEA
+    hostname: WSUS-CNAS-KOLEA
+    restart: unless-stopped
+    volumes:
+      - ./scripts/wsus_telemetry.sh:/telemetry.sh:ro
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq netcat-openbsd cron &&
+        chmod +x /telemetry.sh &&
+        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
+        cron -f &
+        sleep 10 &&
+        /telemetry.sh logstash01 514 &&
+        tail -f /var/log/telemetry.log
+      "
+    networks:
+      - cnas-net
+
+  proxy-cnas:
+    image: ubuntu:22.04
+    container_name: PROXY-CNAS-KOLEA
+    hostname: PROXY-CNAS-KOLEA
+    restart: unless-stopped
+    volumes:
+      - ./scripts/proxy_telemetry.sh:/telemetry.sh:ro
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq netcat-openbsd cron &&
+        chmod +x /telemetry.sh &&
+        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
+        cron -f &
+        sleep 10 &&
+        /telemetry.sh logstash01 514 &&
+        tail -f /var/log/telemetry.log
+      "
+    networks:
+      - cnas-net
+
+  websrv-cnas:
+    image: ubuntu:22.04
+    container_name: WEBSRV-CNAS-KOLEA
+    hostname: WEBSRV-CNAS-KOLEA
+    restart: unless-stopped
+    volumes:
+      - ./scripts/webserver_telemetry.sh:/telemetry.sh:ro
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq netcat-openbsd cron nginx &&
+        service nginx start &&
+        chmod +x /telemetry.sh &&
+        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
+        cron -f &
+        sleep 10 &&
+        /telemetry.sh logstash01 514 &&
+        tail -f /var/log/telemetry.log
+      "
+    networks:
+      - cnas-net
+
+networks:
+  cnas-net:
+    external: true          
+    name: elk_stack_elastic-net      
