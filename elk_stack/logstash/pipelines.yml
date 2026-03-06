@@ -1,0 +1,5 @@
+- pipeline.id: syslog_windows
+  path.config: "/usr/share/logstash/pipeline/logstash.conf"
+
+- pipeline.id: cicids_attacks
+  path.config: "/usr/share/logstash/pipeline/cicids.conf"

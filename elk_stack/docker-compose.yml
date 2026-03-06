@@ -37,6 +37,8 @@ services:
       - "514:514/udp"
     volumes:
       - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./logstash/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
+      - ./data:/usr/share/logstash/data:ro
     environment:
       - "LS_JAVA_OPTS=-Xms512m -Xmx512m"
     depends_on:
