@@ -1,22 +1,18 @@
-# elk_stack/docker-compose.yml
 version: "3.8"
 
 services:
 
-  # ─────────────────────────────────────────
-  # EXISTING SERVICES (unchanged)
-  # ─────────────────────────────────────────
   es01:
     image: docker.elastic.co/elasticsearch/elasticsearch-wolfi:9.1.3
     container_name: es01
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=true          # ← changed
-      - xpack.security.http.ssl.enabled=false # ← add this (keeps HTTP, no cert hassle)
-      - ELASTIC_PASSWORD=changeme            # ← add this
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=changeme
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
     ports:
-      - "9200:9200"
+      - "0.0.0.0:9200:9200"
     volumes:
       - esdata:/usr/share/elasticsearch/data
     networks:
@@ -28,26 +24,25 @@ services:
       retries: 10
 
   kibana01:
-      image: docker.elastic.co/kibana/kibana-wolfi:9.1.3
-      container_name: kibana01
-      ports:
-        - "5601:5601"
-      environment:
-        - ELASTICSEARCH_HOSTS=http://es01:9200
-        - ELASTICSEARCH_USERNAME=kibana_system
-        - ELASTICSEARCH_PASSWORD=changeme
-        - XPACK_FLEET_ENABLED=true
-        - XPACK_FLEET_AGENTS_ELASTICSEARCH_HOSTS=["http://es01:9200"]
-        - XPACK_FLEET_AGENTS_FLEET_SERVER_HOSTS=["http://fleet-server:8220"]
-    # ── Fix for the WARN messages ──────────────────────────────
-        - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=a7f3c1d2e4b5a6f7c8d9e0a1b2c3d4e5  # must be 32+ chars
-        - XPACK_REPORTING_ENCRYPTIONKEY=b8e4d1c2f3a7b6c5d4e3f2a1b0c9d8e7      # must be 32+ chars
-        - XPACK_SECURITY_ENCRYPTIONKEY=c9f5e2d3a4b7c6d5e4f3a2b1c0d9e8f7       # must be 32+ chars
-      depends_on:
-        es01:
-          condition: service_healthy
-      networks:
-        - elastic-net
+    image: docker.elastic.co/kibana/kibana-wolfi:9.1.3
+    container_name: kibana01
+    ports:
+      - "0.0.0.0:5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://es01:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=changeme
+      - XPACK_FLEET_ENABLED=true
+      - XPACK_FLEET_AGENTS_ELASTICSEARCH_HOSTS=["http://es01:9200"]
+      - XPACK_FLEET_AGENTS_FLEET_SERVER_HOSTS=["http://fleet-server:8220"]
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=a7f3c1d2e4b5a6f7c8d9e0a1b2c3d4e5
+      - XPACK_REPORTING_ENCRYPTIONKEY=b8e4d1c2f3a7b6c5d4e3f2a1b0c9d8e7
+      - XPACK_SECURITY_ENCRYPTIONKEY=c9f5e2d3a4b7c6d5e4f3a2b1c0d9e8f7
+    depends_on:
+      es01:
+        condition: service_healthy
+    networks:
+      - elastic-net
 
   logstash01:
     image: docker.elastic.co/logstash/logstash-wolfi:9.1.3
@@ -55,15 +50,14 @@ services:
     ports:
       - "514:514/tcp"
       - "514:514/udp"
-      - "5000:5000"  
+      - "5000:5000"
     volumes:
       - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
       - ./logstash/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
       - ./logstash/ettx-input:/usr/share/logstash/ettx-input
-      - scripts_ad-json-logs:/var/log/ad:ro
-      - scripts_wsus-json-logs:/var/log/wsus:ro
-      - scripts_proxy-json-logs:/var/log/proxy:ro
-      - scripts_websrv-json-logs:/var/log/websrv:ro
+      - ./logstash/datasets:/usr/share/logstash/datasets:ro
+      - proxy-logs:/var/log/proxy:ro
+      - websrv-logs:/var/log/websrv:ro
     environment:
       - "LS_JAVA_OPTS=-Xms512m -Xmx512m"
     depends_on:
@@ -72,9 +66,6 @@ services:
     networks:
       - elastic-net
 
-  # ─────────────────────────────────────────
-  # NEW: FLEET SERVER
-  # ─────────────────────────────────────────
   fleet-server:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
     container_name: fleet-server
@@ -82,66 +73,26 @@ services:
     restart: unless-stopped
     user: root
     environment:
-      - FLEET_SERVER_ENABLE=1                                    # ← use 1 not true
+      - FLEET_SERVER_ENABLE=1
       - FLEET_SERVER_ELASTICSEARCH_HOST=http://es01:9200
       - FLEET_SERVER_SERVICE_TOKEN=${FLEET_SERVICE_TOKEN}
-      - FLEET_SERVER_INSECURE_HTTP=1                             # ← use 1 not true
-      - FLEET_SERVER_ELASTICSEARCH_INSECURE=1                    # ← use 1 not true
+      - FLEET_SERVER_INSECURE_HTTP=1
+      - FLEET_SERVER_ELASTICSEARCH_INSECURE=1
       - FLEET_SERVER_HOST=0.0.0.0
       - FLEET_SERVER_PORT=8220
       - KIBANA_HOST=http://kibana01:5601
       - KIBANA_FLEET_SETUP=1
     volumes:
-      - fleet-server-state:/usr/share/elastic-agent/state       # ← named fresh volume
+      - fleet-server-state:/usr/share/elastic-agent/state
     ports:
-      - "8220:8220"
+      - "0.0.0.0:8220:8220"
     depends_on:
       es01:
         condition: service_healthy
     networks:
       - elastic-net
 
-  # ─────────────────────────────────────────
-  # NEW: ELASTIC AGENT — AD-CNAS
-  # ─────────────────────────────────────────
-  agent-ad:
-    image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
-    container_name: agent-ad
-    hostname: AD-CNAS-KOLEA
-    restart: unless-stopped
-    user: root
-    volumes:
-      - ./agent-configs/ad-agent-policy.yml:/usr/share/elastic-agent/elastic-agent.yml:ro
-    environment:
-      - FLEET_ENROLL=true
-      - FLEET_URL=http://fleet-server:8220
-      - FLEET_ENROLLMENT_TOKEN=${AD_ENROLLMENT_TOKEN}   
-      - FLEET_INSECURE=true
-    depends_on:
-      - fleet-server
-    networks:
-      - elastic-net
-
-  # ─────────────────────────────────────────
-  # NEW: ELASTIC AGENT — WSUS-CNAS
-  # ─────────────────────────────────────────
-  agent-wsus:
-    image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
-    container_name: agent-wsus
-    hostname: WSUS-CNAS-KOLEA
-    restart: unless-stopped
-    user: root
-    volumes:
-      - ./agent-configs/wsus-agent-policy.yml:/usr/share/elastic-agent/elastic-agent.yml:ro
-    environment:
-      - FLEET_ENROLL=true
-      - FLEET_URL=http://fleet-server:8220
-      - FLEET_ENROLLMENT_TOKEN=${WSUS_ENROLLMENT_TOKEN}     
-      - FLEET_INSECURE=true
-    depends_on:
-      - fleet-server
-    networks:
-      - elastic-net
+  # AD-CNAS and WSUS-CNAS are real Windows VMs — no containers here
 
   agent-proxy:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
@@ -155,7 +106,7 @@ services:
       - FLEET_ENROLLMENT_TOKEN=${PROXY_ENROLLMENT_TOKEN}
       - FLEET_INSECURE=true
     volumes:
-      - scripts_proxy-json-logs:/var/log/proxy:ro    
+      - proxy-logs:/var/log/squid:ro
     depends_on:
       - fleet-server
     networks:
@@ -173,7 +124,7 @@ services:
       - FLEET_ENROLLMENT_TOKEN=${WEBSRV_ENROLLMENT_TOKEN}
       - FLEET_INSECURE=true
     volumes:
-      - scripts_websrv-json-logs:/var/log/websrv:ro
+      - websrv-logs:/var/log/nginx:ro
     depends_on:
       - fleet-server
     networks:
@@ -184,22 +135,11 @@ volumes:
     driver: local
   fleet-server-state:
     driver: local
-  scripts_ad-json-logs:
-    external: true
-    name: scripts_ad-json-logs
-  scripts_wsus-json-logs:
-    external: true
-    name: scripts_wsus-json-logs
-  scripts_proxy-json-logs:
-    external: true
-    name: scripts_proxy-json-logs
-  scripts_websrv-json-logs:
-    external: true
-    name: scripts_websrv-json-logs
+  proxy-logs:
+    driver: local
+  websrv-logs:
+    driver: local
 
 networks:
   elastic-net:
     driver: bridge
-  cnas-net:
-    driver: bridge
-    name: elk_stack_elastic-net       # must match docker-compose.cnas.yml external ref
