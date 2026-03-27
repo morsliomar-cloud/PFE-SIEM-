@@ -4,3 +4,7 @@
 
 - pipeline.id: ettx-attacks
   path.config: "/usr/share/logstash/pipeline/ettx-attacks.conf"
+
+- pipeline.id: cicids
+  path.config: "/usr/share/logstash/pipeline/cicids.conf"
+  pipeline.workers: 1

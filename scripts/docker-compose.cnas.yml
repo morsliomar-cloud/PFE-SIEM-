@@ -1,111 +1,40 @@
 version: "3.8"
 
 services:
-  ad-cnas:
-    image: ubuntu:22.04
-    container_name: AD-CNAS-KOLEA
-    hostname: AD-CNAS-KOLEA
-    restart: unless-stopped
-    volumes:
-      - ./scripts/ad_telemetry.sh:/telemetry.sh:ro
-      - ad-json-logs:/var/log              # shared with Elastic Agent
-    command: >
-      bash -c "
-        apt-get update -qq &&
-        apt-get install -y -qq netcat-openbsd cron jq &&
-        touch /var/log/ad-telemetry.json &&
-        chmod 644 /var/log/ad-telemetry.json &&
-        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
-        cron -f &
-        sleep 30 &&
-        /telemetry.sh logstash01 514 | tee -a /var/log/telemetry.log &&
-        tail -f /var/log/ad-telemetry.json
-      "
-    networks:
-      - cnas-net
 
-  wsus-cnas:
-    image: ubuntu:22.04
-    container_name: WSUS-CNAS-KOLEA
-    hostname: WSUS-CNAS-KOLEA
-    restart: unless-stopped
-    volumes:
-      - ./scripts/wsus_telemetry.sh:/telemetry.sh:ro
-      - wsus-json-logs:/var/log               # ← add this
-    command: >
-      bash -c "
-        apt-get update -qq &&
-        apt-get install -y -qq netcat-openbsd cron jq &&
-        touch /var/log/wsus-telemetry.json &&
-        chmod 644 /var/log/wsus-telemetry.json &&
-        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
-        cron -f &
-        sleep 30 &&
-        /telemetry.sh logstash01 514 | tee -a /var/log/telemetry.log &&
-        tail -f /var/log/wsus-telemetry.json
-      "
-    networks:
-      - cnas-net
+  # AD-CNAS and WSUS-CNAS removed — replaced by real Windows VMs
 
   proxy-cnas:
-    image: ubuntu:22.04
+    image: ubuntu/squid:latest
     container_name: PROXY-CNAS-KOLEA
     hostname: PROXY-CNAS-KOLEA
     restart: unless-stopped
+    ports:
+      - "3128:3128"
     volumes:
-      - ./scripts/proxy_telemetry.sh:/telemetry.sh:ro
-      - proxy-json-logs:/var/log
-    command: >
-      bash -c "
-        apt-get update -qq &&
-        apt-get install -y -qq netcat-openbsd cron &&
-        touch /var/log/proxy-telemetry.json &&
-        chmod 644 /var/log/proxy-telemetry.json &&
-        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
-        cron -f &
-        sleep 30 &&
-        /telemetry.sh logstash01 514 | tee -a /var/log/telemetry.log &&
-        tail -f /var/log/proxy-telemetry.json
-      "
+      - proxy-logs:/var/log/squid
     networks:
       - cnas-net
 
   websrv-cnas:
-    image: ubuntu:22.04
+    image: nginx:latest
     container_name: WEBSRV-CNAS-KOLEA
     hostname: WEBSRV-CNAS-KOLEA
     restart: unless-stopped
+    ports:
+      - "80:80"
     volumes:
-      - ./scripts/webserver_telemetry.sh:/telemetry.sh:ro
-      - websrv-json-logs:/var/log
-    command: >
-      bash -c "
-        apt-get update -qq &&
-        apt-get install -y -qq netcat-openbsd cron nginx &&
-        service nginx start &&
-        touch /var/log/websrv-telemetry.json &&
-        chmod 644 /var/log/websrv-telemetry.json &&
-        echo '*/5 * * * * /telemetry.sh logstash01 514 >> /var/log/telemetry.log 2>&1' | crontab - &&
-        cron -f &
-        sleep 30 &&
-        /telemetry.sh logstash01 514 | tee -a /var/log/telemetry.log &&
-        tail -f /var/log/websrv-telemetry.json
-      "
+      - websrv-logs:/var/log/nginx
     networks:
       - cnas-net
+
+volumes:
+  proxy-logs:
+    driver: local
+  websrv-logs:
+    driver: local
 
 networks:
   cnas-net:
     external: true
     name: elk_stack_elastic-net
-
-# Moved to the root level!
-volumes:
-  ad-json-logs:
-    driver: local
-  wsus-json-logs:
-    driver: local
-  proxy-json-logs:
-    driver: local
-  websrv-json-logs:
-    driver: local
