@@ -12,7 +12,7 @@ services:
     ports:
     - "3128:3128"
     volumes:
-    - proxy-logs:/var/log/squid    # only this, nothing else
+    - proxy-logs:/var/log/squid
     networks:
     - cnas-net
 
