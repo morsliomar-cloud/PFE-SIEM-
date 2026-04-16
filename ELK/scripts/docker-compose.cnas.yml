@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+
+  proxy-cnas:
+    build:
+      context: ./squid
+      dockerfile: Dockerfile
+    container_name: PROXY-CNAS-KOLEA
+    hostname: PROXY-CNAS-KOLEA
+    restart: unless-stopped
+    ports:
+    - "3128:3128"
+    volumes:
+    - proxy-logs:/var/log/squid    # only this, nothing else
+    networks:
+    - cnas-net
+
+  websrv-cnas:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: WEBSRV-CNAS-KOLEA
+    hostname: WEBSRV-CNAS-KOLEA
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - websrv-logs:/var/log/nginx
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - cnas-net
+
+volumes:
+  proxy-logs:
+    external: true
+    name: elk_stack_proxy-logs
+  websrv-logs:
+    external: true
+    name: elk_stack_websrv-logs
+
+networks:
+  cnas-net:
+    external: true
+    name: elk_stack_elastic-net
