@@ -2,37 +2,43 @@ version: "3.8"
 
 services:
 
-  # AD-CNAS and WSUS-CNAS removed — replaced by real Windows VMs
-
   proxy-cnas:
-    image: ubuntu/squid:latest
+    build:
+      context: ./squid
+      dockerfile: Dockerfile
     container_name: PROXY-CNAS-KOLEA
     hostname: PROXY-CNAS-KOLEA
     restart: unless-stopped
     ports:
-      - "3128:3128"
+    - "3128:3128"
     volumes:
-      - proxy-logs:/var/log/squid
+    - proxy-logs:/var/log/squid    # only this, nothing else
     networks:
-      - cnas-net
+    - cnas-net
 
   websrv-cnas:
-    image: nginx:latest
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
     container_name: WEBSRV-CNAS-KOLEA
     hostname: WEBSRV-CNAS-KOLEA
     restart: unless-stopped
     ports:
       - "80:80"
+      - "8080:8080"
     volumes:
       - websrv-logs:/var/log/nginx
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
       - cnas-net
 
 volumes:
   proxy-logs:
-    driver: local
+    external: true
+    name: elk_stack_proxy-logs
   websrv-logs:
-    driver: local
+    external: true
+    name: elk_stack_websrv-logs
 
 networks:
   cnas-net:
