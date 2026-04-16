@@ -107,7 +107,7 @@ services:
   agent-proxy:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
     container_name: agent-proxy
-    hostname: PROXY-CNAS-KOLEA
+    hostname: agent-proxy
     restart: unless-stopped
     user: root
     privileged: true
@@ -134,7 +134,7 @@ services:
   agent-websrv:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
     container_name: agent-websrv
-    hostname: WEBSRV-CNAS-KOLEA
+    hostname: agent-websrv
     restart: unless-stopped
     user: root
     privileged: true

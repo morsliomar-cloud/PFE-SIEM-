@@ -12,7 +12,7 @@ services:
     ports:
     - "3128:3128"
     volumes:
-    - proxy-logs:/var/log/squid    # only this, nothing else
+    - proxy-logs:/var/log/squid
     networks:
     - cnas-net
 
@@ -25,6 +25,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "8080:8080"
     volumes:
       - websrv-logs:/var/log/nginx
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
