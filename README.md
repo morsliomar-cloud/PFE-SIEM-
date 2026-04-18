@@ -4,10 +4,10 @@ A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNA
 
 > **Read this first.** This README documents:
 > - the **target architecture**,
-> - the **verified deployed state**,
-> - and the **current gaps / issues**.
+> - the **current deployed state**,
+> - and the **migration / validation steps** between them.
 >
-> For anything operational, trust the verified state first.
+> Trust the **verified deployed state** first when troubleshooting.
 
 ---
 
@@ -70,11 +70,11 @@ A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNA
 │  │                                                                     │    │
 │  │  AD-CNAS-KOLEA (Windows Server 2025)                               │    │
 │  │    Elastic Agent → Fleet Server (10.10.10.1:8220)                  │    │
-│  │    Live Windows logs → ECS data streams                           │    │
+│  │    Live Windows logs → ECS data streams                            │    │
 │  │                                                                     │    │
 │  │  WSUS-CNAS-KOLEA (Windows Server 2025)                             │    │
 │  │    Elastic Agent → Fleet Server (10.10.10.1:8220)                  │    │
-│  │    Live Windows logs → ECS data streams                           │    │
+│  │    Live Windows logs → ECS data streams                            │    │
 │  │                                                                     │    │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
@@ -282,342 +282,53 @@ done
 
 ## 10. Phase 2 — Fleet Server & Agent Enrollment
 
-Keep your existing Fleet Server service token and enrollment setup.
+### Generate Fleet Server service token
 
-### Create agent policies in Kibana
+```bash
+curl -s -u elastic:changeme \
+  -X POST "http://localhost:9200/_security/service/elastic/fleet-server/credential/token/fleet-token-1" \
+  -H "Content-Type: application/json" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['token']['value'])"
+```
 
-| Policy name | Purpose |
-|---|---|
-| AD-CNAS Policy | Windows Security, System, Sysmon |
-| WSUS-CNAS Policy | Windows Security, System, Sysmon |
-| PROXY-CNAS Policy | Squid logs |
-| WEBSRV-CNAS Policy | Nginx logs |
+Paste output into `elk_stack/.env` as `FLEET_SERVICE_TOKEN=`.
+
+### Start Fleet Server
+
+```bash
+docker compose up -d fleet-server
+docker logs fleet-server 2>&1 | grep -E "started|error" | tail -5
+```
+
+### Create Agent Policies in Kibana
+
+`http://localhost:5601` → **Management** → **Fleet** → **Agent Policies** → **Create agent policy**
+
+| Policy name | System integration | Custom log paths |
+|---|---|---|
+| `AD-CNAS Policy` | ✅ enabled | Windows Event Log integration |
+| `WSUS-CNAS Policy` | ✅ enabled | Windows Event Log integration |
+| `PROXY-CNAS Policy` | ✅ enabled | `/var/log/squid/access.log` |
+| `WEBSRV-CNAS Policy` | ✅ enabled | `/var/log/nginx/access.log` |
+
+### Start Docker agents (proxy + websrv)
+
+```bash
+docker compose up -d agent-proxy agent-websrv
+```
+
+### Enroll Windows VMs — see Phase 6
 
 ---
 
 ## 11. Phase 3 — Logstash Multi-Pipeline
 
-Keep your Logstash pipeline for syslog and any remaining file-based ingestion.
+### `logstash/pipelines.yml`
 
-The important part now is that the README should clearly say:
-- live Windows logs are handled by Elastic Agent,
-- data streams are used for Windows sources,
-- Logstash is mainly for syslog and any file-based replay.
-
----
-
-## 12. Phase 4 — Dataset Preparation
-
-If you are now using real data, keep this section only for sources you still need.  
-If EVTX and CICIDS are no longer part of your current workflow, mark them as legacy or optional.
-
----
-
-## 13. Phase 5 — CNAS Containers (Proxy & WebSrv)
-
-AD and WSUS are real Windows VMs. Proxy and WebSrv remain Docker containers.
-
-```bash
-cd ~/ELK/elk_stack
-docker compose -f docker-compose.cnas.yml up -d
-docker compose up -d agent-proxy agent-websrv
+```yaml
+- pipeline.id: main
+  path.config: "/usr/share/logstash/pipeline/ettx-attacks.conf"
+  pipeline.workers: 1
 ```
 
-### Verify logs exist in the service containers
-
-```bash
-docker exec PROXY-CNAS-KOLEA tail -f /var/log/squid/access.log
-docker exec WEBSRV-CNAS-KOLEA tail -f /var/log/nginx/access.log
-```
-
-### Verify the agent containers can read the mounted logs
-
-```bash
-docker inspect agent-proxy | grep -A 20 "Mounts"
-docker inspect agent-websrv | grep -A 20 "Mounts"
-
-docker exec -it agent-proxy ls -lh /var/log/squid/
-docker exec -it agent-websrv ls -lh /var/log/nginx/
-
-docker exec -it agent-proxy tail -5 /var/log/squid/access.log
-docker exec -it agent-websrv tail -5 /var/log/nginx/access.log
-```
-
-### Important limitation
-
-Minimal Linux containers may not include:
-- `systemctl`
-- `service`
-- `rsyslog`
-- `/var/log/auth.log`
-- `/var/log/syslog`
-
-So missing auth/syslog logs in those containers may be normal.
-
----
-
-## 14. Phase 6 — Windows VMs Setup (AD & WSUS)
-
-Keep your VirtualBox setup and Host-Only networking.
-
-### Mandatory adapter setup
-
-| Setting | Value |
-|---|---|
-| Adapter 1 | NAT |
-| Adapter 2 | Host-Only Adapter → `10.10.10.1` |
-
-### Hosts file entries
-
-```powershell
-Add-Content "C:\Windows\System32\drivers\etc\hosts" "10.10.10.1`t es01"
-Add-Content "C:\Windows\System32\drivers\etc\hosts" "10.10.10.1`t fleet-server"
-```
-
-### Connectivity check
-
-```powershell
-Test-NetConnection -ComputerName es01 -Port 9200
-Test-NetConnection -ComputerName fleet-server -Port 8220
-```
-
-### Elastic Agent install
-
-Keep your existing Windows install steps.
-
----
-
-## 15. Phase 7 — VirtualBox Networking for VM→Docker Connectivity
-
-Keep the Host-Only explanation because it is useful and correct.
-
-The important point:
-- `10.0.2.2` from NAT is not reliable for Docker Desktop + WSL2
-- `10.10.10.1` Host-Only works
-
----
-
-## 16. Phase 8 — Shared Volume Wiring
-
-Keep the shared volume setup and add a direct validation step:
-
-```bash
-docker inspect agent-proxy | grep -A 20 "Mounts"
-docker inspect agent-websrv | grep -A 20 "Mounts"
-```
-
----
-
-## 17. Phase 9 — Ingest & Verify
-
-This section should emphasize **data streams first**.
-
-### Check data streams
-
-```bash
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream?pretty"
-```
-
-### Check the streams that matter
-
-```bash
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-windows.sysmon_operational-default/_stats?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-system.security-default/_stats?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-squid.log-default/_stats?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-nginx.access-default/_stats?pretty"
-```
-
-### Check recent documents
-
-```bash
-curl -s -u elastic:changeme "http://localhost:9200/logs-windows.sysmon_operational-default/_search?pretty" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "size": 1,
-    "sort": [{"@timestamp":"desc"}]
-  }'
-```
-
-### Classic indices still matter for Logstash outputs
-
-```bash
-curl -s -u elastic:changeme \
-  "http://localhost:9200/_cat/indices/sysmon-*,syslog-*,*-cnas-*?v&h=index,docs.count&s=index"
-```
-
-### Verification rule
-
-A source is only working when:
-1. the stream or index exists,
-2. documents are present,
-3. recent events can be queried.
-
-Fleet health alone is not enough.
-
----
-
-## 18. Kibana Data Views
-
-Create these data views in Kibana:
-
-| Data View name | Index pattern | Time field | Purpose |
-|---|---|---|---|
-| CNAS — All Sources | `*-cnas-*,sysmon-*,auth-cnas-*,logs-system.*,logs-windows.*,logs-squid.*,logs-nginx.*` | `@timestamp` | Main investigation view |
-| Windows Live | `logs-system.*,logs-windows.*` | `@timestamp` | AD / WSUS live events |
-| Proxy + Web | `logs-squid.*,logs-nginx.*` | `@timestamp` | Container service logs |
-| Fleet Telemetry | `logs-elastic_agent.*,metrics-*` | `@timestamp` | Agent and stack health |
-| Raw Syslog | `syslog-*` | `@timestamp` | Logstash syslog receiver |
-
-### Important note
-
-Some live Windows and service outputs are data streams, so they may not show up where classic indices appear.
-
----
-
-## 19. Phase 10 — Elastic Security & Detection Rules
-
-This was missing before, so keep it explicit.
-
-### Enable Elastic Security
-
-Kibana → **Security** → **Get started**
-
-### Load built-in detection rules
-
-Kibana → **Security** → **Rules** → **Detection Rules** → **Add Elastic rules**
-
-### Rules that should be enabled first
-
-| Rule / focus | Typical condition | Purpose |
-|---|---|---|
-| Account Lockout | `event.code: "4740"` | Brute-force / lockout detection |
-| High Failed Logon Attempts | `event.code: "4625"` | Credential stuffing / password spray |
-| Kerberoasting via Service Tickets | `event.code: "4769"` | Kerberos abuse |
-| DCSync / Directory Replication Access | `event.code: "4662"` | Domain replication abuse |
-| Sensitive Privilege Use | `event.code: "4672"` | Privilege escalation |
-| Member Added to Security Group | `event.code: "4728"` | Persistence / privilege changes |
-
-### Recommended rule coverage
-
-| Tag filter | Fires on |
-|---|---|
-| Windows | `sysmon-*`, `logs-windows.*` |
-| Credential Access | `sysmon-*`, `logs-windows.*` |
-| Lateral Movement | `sysmon-*` |
-| Network | `network-cnas-*` |
-| Web Application Attack | `proxy-cnas-*` |
-
-### Custom rule example
-
-```text
-Index patterns: *-cnas-*, sysmon-*, logs-windows.*
-KQL: event.code: "4625" and event.category: "authentication"
-Group by: source.ip
-Threshold: >= 5 events in 5 minutes
-Severity: High
-MITRE: Credential Access / T1110
-```
-
----
-
-## 20. Migration: Current State → Target Architecture
-
-If you are now using real data, keep this section only for what still needs to be migrated.  
-You can remove the EVTX and CICIDS replay steps if they are no longer part of your workflow.
-
----
-
-## 21. Real Production Deployment
-
-Keep this section. It is still useful.
-
-The same architecture can be used for a real Windows or Linux machine by changing only the Fleet URL and enrollment token.
-
----
-
-## 22. Known Issues & Fixes
-
-### Sysmon not in index list
-`logs-windows.sysmon_operational-default` is a data stream, not a classic index. Check **Data Streams**.
-
-### Elasticsearch health is YELLOW
-Expected on a single-node lab because replica shards cannot be allocated.
-
-### Agent is healthy but no logs appear
-Check:
-- mount paths,
-- actual log file contents,
-- data stream creation,
-- recent documents.
-
-### Nginx logs missing
-Check:
-- `agent-websrv` mounts,
-- `/var/log/nginx/` content,
-- stream existence in Elasticsearch.
-
-### Linux auth/syslog missing
-This may be normal in minimal service containers that do not run rsyslog or create those logs.
-
-### Windows Server 2025 filtering warning
-Do not rely only on Fleet policy filtering. Confirm actual arriving events in the data stream.
-
-### Logstash sincedb prevents replay
-Delete `sincedb-*` and restart Logstash.
-
----
-
-## 23. Troubleshooting Reference
-
-### Check all containers
-
-```bash
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-```
-
-### Check mounts for the agents
-
-```bash
-docker inspect agent-proxy | grep -A 20 "Mounts"
-docker inspect agent-websrv | grep -A 20 "Mounts"
-```
-
-### Check file visibility inside agents
-
-```bash
-docker exec -it agent-proxy tail -5 /var/log/squid/access.log
-docker exec -it agent-websrv tail -5 /var/log/nginx/access.log
-```
-
-### Check agent logs
-
-```bash
-docker logs agent-proxy --tail 50
-docker logs agent-websrv --tail 50
-```
-
-### Check Windows connectivity
-
-```powershell
-Test-NetConnection -ComputerName es01 -Port 9200
-Test-NetConnection -ComputerName fleet-server -Port 8220
-Get-Service "Elastic Agent"
-```
-
-### Check data stream existence
-
-```bash
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-system.security-default?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-windows.sysmon_operational-default?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-squid.log-default?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-nginx.access-default?pretty"
-```
-
-### If a stream returns 404
-That source is not ingesting yet, even if Fleet says the agent is healthy.
-
----
-
-## 24. Credentials & Quick Reference
-
-Keep your existing credentials and quick command references here.
+### `logstash/pipeline/ettx-attacks.conf` ... keep your existing file content here
