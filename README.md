@@ -236,6 +236,8 @@ Real Nginx container generating access.log entries, shipped by `agent-websrv` to
 | Python 3 | 3.9+ |
 | `curl` | Included in Git Bash |
 
+> **VirtualBox Host-Only network prerequisite:** Before starting any VMs, verify that a Host-Only network at `10.10.10.1 / 255.255.255.0` exists in VirtualBox (File → Tools → Network Manager → Host-only Networks). Create it if missing. The VMs will not be able to reach Docker without this adapter.
+
 ### Windows / Git Bash — mandatory setup
 
 ```bash
@@ -983,6 +985,29 @@ Rules written against this lab fire on live machines immediately — same EventI
 - `netsh portproxy` — unreliable with VirtualBox NAT
 - Static Docker IPs (`172.20.x.x`) — internal only, not reachable from outside Docker
 
+### `networkingMode=mirrored` in `.wslconfig` breaks networking
+
+**Cause:** Setting `networkingMode=mirrored` in `%USERPROFILE%\.wslconfig` is sometimes suggested as a fix for WSL2 port exposure, but it interferes with Docker Desktop's internal networking and breaks container-to-container and host-to-container connectivity.
+
+**Fix:** Remove the line, then restart WSL2 and Docker:
+```powershell
+# Edit %USERPROFILE%\.wslconfig — remove or comment out networkingMode=mirrored
+wsl --shutdown
+# Then restart Docker Desktop
+```
+
+### `netsh portproxy` is unreliable with VirtualBox NAT
+
+**Cause:** Port proxying via `netsh interface portproxy` routes traffic through the Windows NAT layer, which still hits the WSL2 Hyper-V firewall before reaching Docker. Connections appear to be forwarded but drop silently.
+
+**Fix:** Do not use `netsh portproxy` for this setup. Use the VirtualBox Host-Only adapter (`10.10.10.1`) as described in Phase 7.
+
+### `0.0.0.0` binding in `docker ps` is misleading on WSL2
+
+**Cause:** `docker ps` shows `0.0.0.0:9200->9200/tcp`, which implies all-interface binding. On WSL2 this is true within the WSL2 virtual network, but the Hyper-V WSL firewall still blocks inbound TCP from external sources (including VirtualBox NAT). The port is genuinely reachable only from `127.0.0.1` on the Windows host — not from VMs.
+
+**The only correct fix** is the VirtualBox Host-Only adapter — a native Windows interface that Docker's `0.0.0.0` binding covers without Hyper-V firewall interference.
+
 ### Data streams are YELLOW
 
 Single-node cluster — replicas cannot be assigned. Not an error, ignore it.
@@ -1068,6 +1093,40 @@ DELETE /logs-windows.sysmon_operational
 
 ```bash
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+### Host PC — verify Docker port bindings (run on Windows host, not in WSL)
+
+```powershell
+# Confirm Docker is actually binding to all interfaces
+netstat -ano | findstr "9200"
+netstat -ano | findstr "8220"
+# Both must show: 0.0.0.0:9200 and 0.0.0.0:8220
+
+# Find VirtualBox Host-Only adapter IP
+ipconfig /all
+# Look for "VirtualBox Host-Only Ethernet Adapter" — IPv4 Address must be 10.10.10.1
+
+# Confirm ports are reachable from the host itself
+Test-NetConnection -ComputerName localhost -Port 9200
+Test-NetConnection -ComputerName localhost -Port 8220
+# TcpTestSucceeded : True ✅
+```
+
+### Host PC — Windows Firewall rules for ELK (run as Administrator)
+
+If VMs still cannot reach Docker after confirming the Host-Only adapter, Windows Firewall may be blocking the ports. Add rules:
+
+```powershell
+New-NetFirewallRule -DisplayName "ELK ES 9200"     -Direction Inbound -Protocol TCP -LocalPort 9200 -Action Allow
+New-NetFirewallRule -DisplayName "ELK Fleet 8220"  -Direction Inbound -Protocol TCP -LocalPort 8220 -Action Allow
+New-NetFirewallRule -DisplayName "ELK Kibana 5601" -Direction Inbound -Protocol TCP -LocalPort 5601 -Action Allow
+```
+
+Verify the rules were created:
+
+```powershell
+Get-NetFirewallRule | Where-Object { $_.DisplayName -like "*ELK*" }
 ```
 
 ### Windows VM connectivity check
