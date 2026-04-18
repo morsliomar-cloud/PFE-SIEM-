@@ -1,120 +1,321 @@
 # PFE-SIEM — ELK Stack 9.x CNAS Lab
 
-A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNAS agency nodes (AD, WSUS, Proxy, WebSrv), ingesting historical attack datasets and live service logs, and running Elastic Security detections with ECS-normalized data.
+A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNAS agency nodes (AD, WSUS, Proxy, WebSrv), ingesting real cybersecurity datasets and live logs, and running attack detection via Elastic Security — all normalized to **Elastic Common Schema (ECS)**.
 
-> **Read this first.** This README separates:
-> - **Target architecture** — the intended final design
-> - **Verified deployed state** — what was actually confirmed working
-> - **Current gaps** — sources that are enabled or expected, but not yet fully verified
+> **Read this first.** This README documents:
+> - the **target architecture**,
+> - the **verified deployed state**,
+> - and the **current gaps / issues**.
 >
-> For deployment, follow the target architecture.
-> For troubleshooting and detection engineering, trust the verified state first.
+> For anything operational, trust the verified state first.
+
+---
+
+## Table of Contents
+
+1. [Architecture Overview](#1-architecture-overview)
+2. [Data Tiers — Real vs Simulated vs Live](#2-data-tiers--real-vs-simulated-vs-live)
+3. [Elastic Agent vs Logstash — Who Does What](#3-elastic-agent-vs-logstash--who-does-what)
+4. [ECS Normalization — Core Requirement](#4-ecs-normalization--core-requirement)
+5. [Dataset Mapping per CNAS Source](#5-dataset-mapping-per-cnas-source)
+6. [Current Deployed State](#6-current-deployed-state)
+7. [Prerequisites](#7-prerequisites)
+8. [Repository Layout](#8-repository-layout)
+9. [Phase 1 — Core ELK Stack](#9-phase-1--core-elk-stack)
+10. [Phase 2 — Fleet Server & Agent Enrollment](#10-phase-2--fleet-server--agent-enrollment)
+11. [Phase 3 — Logstash Multi-Pipeline](#11-phase-3--logstash-multi-pipeline)
+12. [Phase 4 — Dataset Preparation](#12-phase-4--dataset-preparation)
+13. [Phase 5 — CNAS Containers (Proxy & WebSrv)](#13-phase-5--cnas-containers-proxy--websrv)
+14. [Phase 6 — Windows VMs Setup (AD & WSUS)](#14-phase-6--windows-vms-setup-ad--wsus)
+15. [Phase 7 — VirtualBox Networking for VM→Docker Connectivity](#15-phase-7--virtualbox-networking-for-vmdocker-connectivity)
+16. [Phase 8 — Shared Volume Wiring](#16-phase-8--shared-volume-wiring)
+17. [Phase 9 — Ingest & Verify](#17-phase-9--ingest--verify)
+18. [Kibana Data Views](#18-kibana-data-views)
+19. [Phase 10 — Elastic Security & Detection Rules](#19-phase-10--elastic-security--detection-rules)
+20. [Migration: Current State → Target Architecture](#20-migration-current-state--target-architecture)
+21. [Real Production Deployment](#21-real-production-deployment)
+22. [Known Issues & Fixes](#22-known-issues--fixes)
+23. [Troubleshooting Reference](#23-troubleshooting-reference)
+24. [Credentials & Quick Reference](#24-credentials--quick-reference)
 
 ---
 
 ## 1. Architecture Overview
 
-### Core stack
-- **Elasticsearch** (`es01`)
-- **Kibana** (`kibana01`)
-- **Logstash** (`logstash01`)
-- **Fleet Server** (`fleet-server`)
-
-### Live sources
-- **AD-CNAS-KOLEA** — real Windows Server 2025 VM
-- **WSUS-CNAS-KOLEA** — real Windows Server 2025 VM
-- **PROXY-CNAS-KOLEA** — Squid container
-- **WEBSRV-CNAS-KOLEA** — Nginx container
-
-### Important container design
-Elastic Agent does **not** run inside the Squid or Nginx service containers.
-
-It runs in two separate containers:
-- `agent-proxy`
-- `agent-websrv`
-
-Those agent containers read service logs through shared Docker volumes mounted read-only.
-
-### Windows live outputs
-Windows VM events are collected through Elastic Agent and land in data streams such as:
-- `logs-system.security-default`
-- `logs-system.application-default`
-- `logs-system.system-default`
-- `logs-windows.powershell-default`
-- `logs-windows.powershell_operational-default`
-- `logs-windows.sysmon_operational-default`
-- `logs-windows.windows_defender-default`
-
-### Historical datasets
-Historical attack data is still ingested through Logstash into classic indices:
-- `sysmon-*`
-- `network-cnas-*`
-- `proxy-cnas-*`
-- `auth-cnas-*`
-- `syslog-*`
-
----
-
-## 2. Verified Deployed State
-
-### Confirmed working
-- Elasticsearch running
-- Kibana running
-- Logstash running
-- Fleet Server running
-- Windows VMs enrolled to Fleet
-- `logs-system.security-default` receiving data
-- `logs-system.application-default` present
-- `logs-system.system-default` present
-- `logs-windows.powershell-default` present
-- `logs-windows.powershell_operational-default` present
-- `logs-windows.sysmon_operational-default` receiving live data
-- `logs-windows.windows_defender-default` present
-- `logs-squid.log-default` receiving data
-- Historical `sysmon-*` ingestion working
-- Raw `syslog-*` ingestion working
-
-### Still under diagnosis / not fully verified
-- `logs-nginx.access-default`
-- `logs-nginx.error-default`
-- `logs-system.auth-default`
-- `logs-system.syslog-default`
-- `network-cnas-*` if CICIDS CSVs were not yet dropped
-- `auth-cnas-*` if Faker data was not yet generated
-
-### Important interpretation notes
-- `logs-windows.sysmon_operational-default` is a **data stream**, not a classic index.
-- It must be checked in **Kibana → Stack Management → Index Management → Data Streams**.
-- On a single-node lab cluster, **YELLOW** health is expected because replica shards cannot be assigned.
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CURRENT ARCHITECTURE                                │
+│                                                                             │
+│  ┌─ HOST PC ──────────────────────────────────────────────────────────┐    │
+│  │                                                                     │    │
+│  │  Docker (WSL2)                                                      │    │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐   │    │
+│  │  │   es01      │  │  kibana01    │  │     logstash01          │   │    │
+│  │  │  :9200      │  │   :5601      │  │  :514/udp :514/tcp      │   │    │
+│  │  └─────────────┘  └──────────────┘  └─────────────────────────┘   │    │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌──────────┐  ┌───────────┐  │    │
+│  │  │fleet-server │  │ proxy-cnas   │  │agent-    │  │agent-     │  │    │
+│  │  │  :8220      │  │(Squid :3128) │  │proxy     │  │websrv     │  │    │
+│  │  └─────────────┘  └──────────────┘  └──────────┘  └───────────┘  │    │
+│  │  ┌─────────────┐                                                   │    │
+│  │  │ websrv-cnas │                                                   │    │
+│  │  │(Nginx :80)  │                                                   │    │
+│  │  └─────────────┘                                                   │    │
+│  │                                                                     │    │
+│  │  VirtualBox Host-Only Adapter: 10.10.10.1  ◄── VMs connect here   │    │
+│  │                                                                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  ┌─ VirtualBox VMs ───────────────────────────────────────────────────┐    │
+│  │                                                                     │    │
+│  │  AD-CNAS-KOLEA (Windows Server 2025)                               │    │
+│  │    Elastic Agent → Fleet Server (10.10.10.1:8220)                  │    │
+│  │    Live Windows logs → ECS data streams                           │    │
+│  │                                                                     │    │
+│  │  WSUS-CNAS-KOLEA (Windows Server 2025)                             │    │
+│  │    Elastic Agent → Fleet Server (10.10.10.1:8220)                  │    │
+│  │    Live Windows logs → ECS data streams                           │    │
+│  │                                                                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  DATA SOURCES              COLLECTION          ECS INDEX / STREAM   PURPOSE │
+│  ─────────────────         ──────────────      ────────────────    ───────  │
+│  Real Windows logs      ─►  Elastic Agent    ─► logs-windows.*     Live AD  │
+│  Sysmon live stream     ─►  Elastic Agent    ─► logs-windows.sysmon_operational-default │
+│  Squid / Nginx logs     ─►  Elastic Agent    ─► logs-squid.* / logs-nginx.* │
+│  Historical attack data  ─►  Logstash        ─► sysmon-*           Detection │
+│  Syslog UDP/TCP :514    ─►  Logstash        ─► syslog-*            Network   │
+│  ALL indices/streams ───────────────────────────────────────────► Elastic Security │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. Elastic Agent vs Logstash
+## 2. Data Tiers — Real vs Simulated vs Live
+
+### Tier 1 — Real historical attack data
+
+The historical datasets in this lab are captures from real attacks on real systems. They are used to validate detection logic and threat hunting patterns.
+
+### Tier 2 — Real production VMs
+
+AD-CNAS-KOLEA and WSUS-CNAS-KOLEA are real Windows Server 2025 VMs. Elastic Agent is installed natively on each VM and enrolled to Fleet Server over the Host-Only network.
+
+### Tier 3 — Real Docker services
+
+PROXY-CNAS-KOLEA runs real Squid and WEBSRV-CNAS-KOLEA runs real Nginx. These are actual service logs, not simulated telemetry.
+
+### Tier 4 — Static file ingestion via Logstash
+
+Logstash is still used for syslog and any file-based ingestion paths that remain part of the lab.
+
+---
+
+## 3. Elastic Agent vs Logstash — Who Does What
 
 ### Elastic Agent handles
-- Live Windows logs from AD and WSUS
-- Live Squid logs from the proxy container
-- Live Nginx logs from the web container
-- Fleet / agent telemetry
-- System metrics
+
+| Source | Method | Output |
+|---|---|---|
+| Windows Event Logs | Native integration | `logs-windows.*` |
+| Sysmon live logs | Windows integration | `logs-windows.sysmon_operational-default` |
+| Squid logs | Custom log integration | `logs-squid.*` |
+| Nginx logs | Custom log integration | `logs-nginx.*` |
+| Fleet telemetry | Built-in | `logs-elastic_agent.*`, `metrics-*` |
 
 ### Logstash handles
-- EVTX historical samples
-- CICIDS network CSVs
-- CICIDS web attack CSVs
-- Faker auth baseline events
-- Raw syslog on UDP/TCP 514
 
-### Rule of thumb
-- **Live machine/service logs** → Elastic Agent
-- **Static datasets / transforms / replay** → Logstash
+| Source | Why Logstash | Output |
+|---|---|---|
+| Syslog UDP/TCP :514 | Receiver and parser | `syslog-*` |
+| Historical attack logs | Static file ingestion | `sysmon-*` |
+| Other replayed files | ECS transform | custom ECS indices |
 
 ---
 
-## 4. Phase 5 — CNAS Containers (Proxy & WebSrv)
+## 4. ECS Normalization — Core Requirement
 
-AD and WSUS are real Windows VMs.
-Only Proxy and WebSrv remain as Docker services.
+Every event ingested into Elasticsearch must use ECS field names. This keeps detection rules consistent across historical and live data.
+
+Examples:
+- `EventID` → `event.code`
+- `TimeCreated` → `@timestamp`
+- `SourceAddress` → `source.ip`
+- `DestAddress` → `destination.ip`
+- `Username` → `user.name`
+- `ComputerName` → `host.name`
+
+---
+
+## 5. Dataset Mapping per CNAS Source
+
+### 5.1 AD-CNAS-KOLEA
+
+The AD VM is a real Windows Server 2025 machine. It produces live Windows events and Sysmon data through Elastic Agent.
+
+### 5.2 WSUS-CNAS-KOLEA
+
+The WSUS VM is also a real Windows Server 2025 machine with native Elastic Agent enrollment.
+
+### 5.3 PROXY-CNAS-KOLEA
+
+Squid generates access logs that are read by the `agent-proxy` container.
+
+### 5.4 WEBSRV-CNAS-KOLEA
+
+Nginx generates access logs that are read by the `agent-websrv` container.
+
+---
+
+## 6. Current Deployed State
+
+| Component | Status | Notes |
+|---|---|---|
+| Elasticsearch (es01) | ✅ Running | Security enabled |
+| Kibana (kibana01) | ✅ Running | Port 5601 |
+| Logstash (logstash01) | ✅ Running | Multi-pipeline |
+| Fleet Server | ✅ Running | Port 8220 |
+| proxy-cnas (Squid) | ✅ Running | Real logs |
+| websrv-cnas (Nginx) | ✅ Running | Real logs |
+| agent-proxy | ✅ Enrolled | Reads Squid logs |
+| agent-websrv | ✅ Enrolled | Reads Nginx logs |
+| AD-CNAS-KOLEA | ✅ Windows VM | Native Elastic Agent |
+| WSUS-CNAS-KOLEA | ✅ Windows VM | Native Elastic Agent |
+
+### Confirmed live streams / indices
+
+| Source | State |
+|---|---|
+| `logs-system.security-default` | ✅ Confirmed |
+| `logs-system.application-default` | ✅ Confirmed |
+| `logs-system.system-default` | ✅ Confirmed |
+| `logs-windows.powershell-default` | ✅ Confirmed |
+| `logs-windows.powershell_operational-default` | ✅ Confirmed |
+| `logs-windows.sysmon_operational-default` | ✅ Confirmed |
+| `logs-windows.windows_defender-default` | ✅ Confirmed |
+| `logs-squid.log-default` | ✅ Confirmed |
+| `syslog-*` | ✅ Confirmed |
+| `sysmon-*` | ✅ Confirmed |
+
+### Still to verify or under diagnosis
+
+| Source | State |
+|---|---|
+| `logs-nginx.access-default` | ⚠️ Verify |
+| `logs-nginx.error-default` | ⚠️ Verify |
+| `logs-system.auth-default` | ⚠️ Verify |
+| `logs-system.syslog-default` | ⚠️ Verify |
+
+### Important note
+
+`logs-windows.sysmon_operational-default` is a **data stream**, not a classic index.  
+It will appear in **Kibana → Stack Management → Index Management → Data Streams**.
+
+A single-node Elasticsearch cluster may stay **YELLOW** because replica shards cannot be assigned. That is expected in this lab.
+
+---
+
+## 7. Prerequisites
+
+| Requirement | Minimum |
+|---|---|
+| Docker Desktop (Windows) | 4.x with WSL2 |
+| RAM for Docker | 8 GB |
+| RAM for VMs | 4 GB additional |
+| Disk | 50 GB free |
+| VirtualBox | 7.x |
+| Windows Server 2025 ISO | For AD and WSUS |
+| Git Bash | Any |
+| Python 3 | 3.9+ |
+| curl | Included in Git Bash |
+
+### Windows / Git Bash setup
+
+```bash
+echo 'export MSYS_NO_PATHCONV=1' >> ~/.bashrc
+source ~/.bashrc
+```
+
+> Never use `/tmp` as a Docker volume target on Windows.
+
+---
+
+## 8. Repository Layout
+
+```text
+ELK/
+├── elk_stack/
+│   ├── docker-compose.yml
+│   ├── docker-compose.cnas.yml
+│   ├── .env
+│   ├── logstash/
+│   │   ├── pipeline/
+│   │   ├── pipelines.yml
+│   │   ├── ettx-input/
+│   │   └── datasets/
+```
+
+---
+
+## 9. Phase 1 — Core ELK Stack
+
+Use your existing Docker Compose setup for Elasticsearch, Kibana, Logstash, and Fleet Server.
+
+### Start and validate
+
+```bash
+cd ~/ELK/elk_stack
+docker compose up -d es01 kibana01 logstash01
+
+until curl -s -u elastic:changeme http://localhost:9200/_cluster/health | grep -qE '"status":"green"|"status":"yellow"'; do
+  echo "Waiting for Elasticsearch..."
+  sleep 5
+done
+
+until curl -s http://localhost:5601/api/status | python3 -c "import sys,json; s=json.load(sys.stdin); exit(0 if s['status']['overall']['level']=='available' else 1)" 2>/dev/null; do
+  echo "Waiting for Kibana..."
+  sleep 5
+done
+```
+
+---
+
+## 10. Phase 2 — Fleet Server & Agent Enrollment
+
+Keep your existing Fleet Server service token and enrollment setup.
+
+### Create agent policies in Kibana
+
+| Policy name | Purpose |
+|---|---|
+| AD-CNAS Policy | Windows Security, System, Sysmon |
+| WSUS-CNAS Policy | Windows Security, System, Sysmon |
+| PROXY-CNAS Policy | Squid logs |
+| WEBSRV-CNAS Policy | Nginx logs |
+
+---
+
+## 11. Phase 3 — Logstash Multi-Pipeline
+
+Keep your Logstash pipeline for syslog and any remaining file-based ingestion.
+
+The important part now is that the README should clearly say:
+- live Windows logs are handled by Elastic Agent,
+- data streams are used for Windows sources,
+- Logstash is mainly for syslog and any file-based replay.
+
+---
+
+## 12. Phase 4 — Dataset Preparation
+
+If you are now using real data, keep this section only for sources you still need.  
+If EVTX and CICIDS are no longer part of your current workflow, mark them as legacy or optional.
+
+---
+
+## 13. Phase 5 — CNAS Containers (Proxy & WebSrv)
+
+AD and WSUS are real Windows VMs. Proxy and WebSrv remain Docker containers.
 
 ```bash
 cd ~/ELK/elk_stack
@@ -122,13 +323,15 @@ docker compose -f docker-compose.cnas.yml up -d
 docker compose up -d agent-proxy agent-websrv
 ```
 
-### Verify the services generate logs
+### Verify logs exist in the service containers
+
 ```bash
 docker exec PROXY-CNAS-KOLEA tail -f /var/log/squid/access.log
 docker exec WEBSRV-CNAS-KOLEA tail -f /var/log/nginx/access.log
 ```
 
-### Verify the agent containers can read those logs
+### Verify the agent containers can read the mounted logs
+
 ```bash
 docker inspect agent-proxy | grep -A 20 "Mounts"
 docker inspect agent-websrv | grep -A 20 "Mounts"
@@ -141,62 +344,91 @@ docker exec -it agent-websrv tail -5 /var/log/nginx/access.log
 ```
 
 ### Important limitation
-Do **not** run Elastic Agent diagnostics inside `PROXY-CNAS-KOLEA` or `WEBSRV-CNAS-KOLEA`.
-Those are service containers, not agent containers.
 
-Always inspect:
-- `agent-proxy`
-- `agent-websrv`
-
-### Minimal-container limitation
-Minimal Linux containers may not contain:
+Minimal Linux containers may not include:
 - `systemctl`
 - `service`
 - `rsyslog`
 - `/var/log/auth.log`
 - `/var/log/syslog`
 
-So missing Linux auth/syslog logs in those containers may be normal unless the image explicitly provides them.
+So missing auth/syslog logs in those containers may be normal.
 
 ---
 
-## 5. Windows Server 2025 note
+## 14. Phase 6 — Windows VMs Setup (AD & WSUS)
 
-When using the Windows integration on Windows Server 2025, Elastic Agent may log a warning similar to:
+Keep your VirtualBox setup and Host-Only networking.
 
-`skipping query filters for Windows Server 2025 due to known issue with Event Log API and forwarded events`
+### Mandatory adapter setup
 
-### What this means
-- Event ID filters may not behave exactly as expected.
-- If your lab requires specific Event IDs in policy, you can still configure them.
-- But you must validate real behavior from the resulting data stream, not only from the Fleet policy screen.
+| Setting | Value |
+|---|---|
+| Adapter 1 | NAT |
+| Adapter 2 | Host-Only Adapter → `10.10.10.1` |
 
-### Practical validation
-Check whether expected events are really arriving:
-- `event.code: "4634"`
-- `event.code: "11"`
-- `event.code: "4769"`
-- `event.code: "4740"`
+### Hosts file entries
+
+```powershell
+Add-Content "C:\Windows\System32\drivers\etc\hosts" "10.10.10.1`t es01"
+Add-Content "C:\Windows\System32\drivers\etc\hosts" "10.10.10.1`t fleet-server"
+```
+
+### Connectivity check
+
+```powershell
+Test-NetConnection -ComputerName es01 -Port 9200
+Test-NetConnection -ComputerName fleet-server -Port 8220
+```
+
+### Elastic Agent install
+
+Keep your existing Windows install steps.
 
 ---
 
-## 6. Phase 9 — Ingest & Verify
+## 15. Phase 7 — VirtualBox Networking for VM→Docker Connectivity
 
-### Step 1 — Check data streams
+Keep the Host-Only explanation because it is useful and correct.
+
+The important point:
+- `10.0.2.2` from NAT is not reliable for Docker Desktop + WSL2
+- `10.10.10.1` Host-Only works
+
+---
+
+## 16. Phase 8 — Shared Volume Wiring
+
+Keep the shared volume setup and add a direct validation step:
+
+```bash
+docker inspect agent-proxy | grep -A 20 "Mounts"
+docker inspect agent-websrv | grep -A 20 "Mounts"
+```
+
+---
+
+## 17. Phase 9 — Ingest & Verify
+
+This section should emphasize **data streams first**.
+
+### Check data streams
+
 ```bash
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream?pretty"
 ```
 
-### Step 2 — Check stream stats
+### Check the streams that matter
+
 ```bash
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-windows.sysmon_operational-default/_stats?pretty"
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-system.security-default/_stats?pretty"
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-squid.log-default/_stats?pretty"
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-nginx.access-default/_stats?pretty"
-curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-system.auth-default/_stats?pretty"
 ```
 
-### Step 3 — Check recent events
+### Check recent documents
+
 ```bash
 curl -s -u elastic:changeme "http://localhost:9200/logs-windows.sysmon_operational-default/_search?pretty" \
   -H "Content-Type: application/json" \
@@ -204,158 +436,176 @@ curl -s -u elastic:changeme "http://localhost:9200/logs-windows.sysmon_operation
     "size": 1,
     "sort": [{"@timestamp":"desc"}]
   }'
-
-curl -s -u elastic:changeme "http://localhost:9200/logs-system.security-default/_search?pretty" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "size": 1,
-    "sort": [{"@timestamp":"desc"}]
-  }'
 ```
 
-### Step 4 — Check classic indices for Logstash-fed datasets
+### Classic indices still matter for Logstash outputs
+
 ```bash
 curl -s -u elastic:changeme \
   "http://localhost:9200/_cat/indices/sysmon-*,syslog-*,*-cnas-*?v&h=index,docs.count&s=index"
 ```
 
-### Validation rule
-A source is considered **working** only if all three are true:
-1. the stream or index exists
-2. documents are present
-3. recent events can be queried
+### Verification rule
 
-Healthy agent status alone is **not enough**.
+A source is only working when:
+1. the stream or index exists,
+2. documents are present,
+3. recent events can be queried.
 
----
-
-## 7. Logstash re-ingest and replay notes
-
-### Clear sincedb and force re-read
-```bash
-MSYS_NO_PATHCONV=1 docker exec logstash01 sh -c "rm -f /usr/share/logstash/data/sincedb-*"
-docker restart logstash01
-```
-
-### If replay created duplicates in a data stream
-Use `_delete_by_query` before re-running the test.
-
-### Sysmon naming fix
-When sending to the live Sysmon destination, the correct target name is:
-
-```ruby
-index => "logs-windows.sysmon_operational-default"
-```
-
-### Important note
-That destination is a **data stream-style name** in your workflow and must be validated from the resulting data stream view, not only from classic index lists.
+Fleet health alone is not enough.
 
 ---
 
-## 8. Kibana Data Views
+## 18. Kibana Data Views
 
-Create data views manually before running detections or validation queries.
+Create these data views in Kibana:
 
 | Data View name | Index pattern | Time field | Purpose |
-|----------------|---------------|------------|---------|
-| CNAS — Historical + Live | `*-cnas-*,sysmon-*,auth-cnas-*,logs-system.*,logs-windows.*,logs-squid.*,logs-nginx.*` | `@timestamp` | Main investigation view |
+|---|---|---|---|
+| CNAS — All Sources | `*-cnas-*,sysmon-*,auth-cnas-*,logs-system.*,logs-windows.*,logs-squid.*,logs-nginx.*` | `@timestamp` | Main investigation view |
 | Windows Live | `logs-system.*,logs-windows.*` | `@timestamp` | AD / WSUS live events |
 | Proxy + Web | `logs-squid.*,logs-nginx.*` | `@timestamp` | Container service logs |
 | Fleet Telemetry | `logs-elastic_agent.*,metrics-*` | `@timestamp` | Agent and stack health |
 | Raw Syslog | `syslog-*` | `@timestamp` | Logstash syslog receiver |
 
-### Important notes
-- Many live sources are **data streams**, not classic indices.
-- Historical EVTX timestamps are from **2020**, so use **All time** or explicitly include 2020 in the time picker.
+### Important note
+
+Some live Windows and service outputs are data streams, so they may not show up where classic indices appear.
 
 ---
 
-## 9. Detection readiness
+## 19. Phase 10 — Elastic Security & Detection Rules
 
-Do not enable or trust detection rules until these are confirmed:
+This was missing before, so keep it explicit.
 
-- Historical `sysmon-*` present
-- Live Windows security data present
-- Live Sysmon data present
-- Squid logs present
-- Nginx logs present if that part is required
-- Required Data Views created
-- Time picker covers both historical and live ranges when needed
+### Enable Elastic Security
 
-### Example first rules to validate
-- `event.code: "4740"` — account lockout
-- `event.code: "4625"` — failed login
-- `event.code: "4769"` — Kerberos ticket requests
-- `event.code: "4662"` — DCSync-related access
-- `event.code: "4672"` — special privileges assigned
+Kibana → **Security** → **Get started**
+
+### Load built-in detection rules
+
+Kibana → **Security** → **Rules** → **Detection Rules** → **Add Elastic rules**
+
+### Rules that should be enabled first
+
+| Rule / focus | Typical condition | Purpose |
+|---|---|---|
+| Account Lockout | `event.code: "4740"` | Brute-force / lockout detection |
+| High Failed Logon Attempts | `event.code: "4625"` | Credential stuffing / password spray |
+| Kerberoasting via Service Tickets | `event.code: "4769"` | Kerberos abuse |
+| DCSync / Directory Replication Access | `event.code: "4662"` | Domain replication abuse |
+| Sensitive Privilege Use | `event.code: "4672"` | Privilege escalation |
+| Member Added to Security Group | `event.code: "4728"` | Persistence / privilege changes |
+
+### Recommended rule coverage
+
+| Tag filter | Fires on |
+|---|---|
+| Windows | `sysmon-*`, `logs-windows.*` |
+| Credential Access | `sysmon-*`, `logs-windows.*` |
+| Lateral Movement | `sysmon-*` |
+| Network | `network-cnas-*` |
+| Web Application Attack | `proxy-cnas-*` |
+
+### Custom rule example
+
+```text
+Index patterns: *-cnas-*, sysmon-*, logs-windows.*
+KQL: event.code: "4625" and event.category: "authentication"
+Group by: source.ip
+Threshold: >= 5 events in 5 minutes
+Severity: High
+MITRE: Credential Access / T1110
+```
 
 ---
 
-## 10. Known Issues & Fixes
+## 20. Migration: Current State → Target Architecture
 
-### Sysmon stream does not appear in index list
-**Cause:** it is a data stream.  
-**Fix:** check **Data Streams**, not only classic indices.
+If you are now using real data, keep this section only for what still needs to be migrated.  
+You can remove the EVTX and CICIDS replay steps if they are no longer part of your workflow.
+
+---
+
+## 21. Real Production Deployment
+
+Keep this section. It is still useful.
+
+The same architecture can be used for a real Windows or Linux machine by changing only the Fleet URL and enrollment token.
+
+---
+
+## 22. Known Issues & Fixes
+
+### Sysmon not in index list
+`logs-windows.sysmon_operational-default` is a data stream, not a classic index. Check **Data Streams**.
 
 ### Elasticsearch health is YELLOW
-**Cause:** single-node lab cannot assign replicas.  
-**Fix:** expected in lab.
+Expected on a single-node lab because replica shards cannot be allocated.
 
 ### Agent is healthy but no logs appear
-**Cause:** agent health does not prove the file path, parser, or dataset is correct.  
-**Fix:** validate mounts, file contents, stream existence, and recent events.
+Check:
+- mount paths,
+- actual log file contents,
+- data stream creation,
+- recent documents.
 
-### Nginx logs still missing
-**Cause:** can be a path issue, dataset issue, or parser/format mismatch.  
-**Fix:** verify volume mount, verify file contents from `agent-websrv`, then verify stream creation in Elasticsearch.
+### Nginx logs missing
+Check:
+- `agent-websrv` mounts,
+- `/var/log/nginx/` content,
+- stream existence in Elasticsearch.
 
-### Linux auth/syslog missing in containers
-**Cause:** minimal service containers may not run rsyslog or create those files at all.  
-**Fix:** only treat this as a failure if the container image is actually designed to emit those logs.
+### Linux auth/syslog missing
+This may be normal in minimal service containers that do not run rsyslog or create those logs.
 
-### Windows Server 2025 query-filter warning
-**Cause:** known Event Log API behavior.  
-**Fix:** validate actual arriving events rather than trusting policy filtering alone.
+### Windows Server 2025 filtering warning
+Do not rely only on Fleet policy filtering. Confirm actual arriving events in the data stream.
 
-### Logstash does not re-read files
-**Cause:** `sincedb` remembers read position.  
-**Fix:** delete `sincedb-*` and restart Logstash.
+### Logstash sincedb prevents replay
+Delete `sincedb-*` and restart Logstash.
 
 ---
 
-## 11. Troubleshooting Reference
+## 23. Troubleshooting Reference
 
-### All containers
+### Check all containers
+
 ```bash
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```
 
-### Check agent mounts
+### Check mounts for the agents
+
 ```bash
 docker inspect agent-proxy | grep -A 20 "Mounts"
 docker inspect agent-websrv | grep -A 20 "Mounts"
 ```
 
-### Check readable log files from agent side
+### Check file visibility inside agents
+
 ```bash
 docker exec -it agent-proxy tail -5 /var/log/squid/access.log
 docker exec -it agent-websrv tail -5 /var/log/nginx/access.log
 ```
 
 ### Check agent logs
+
 ```bash
 docker logs agent-proxy --tail 50
 docker logs agent-websrv --tail 50
 ```
 
-### Check Windows VM connectivity
+### Check Windows connectivity
+
 ```powershell
 Test-NetConnection -ComputerName es01 -Port 9200
 Test-NetConnection -ComputerName fleet-server -Port 8220
 Get-Service "Elastic Agent"
 ```
 
-### Check stream existence
+### Check data stream existence
+
 ```bash
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-system.security-default?pretty"
 curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-windows.sysmon_operational-default?pretty"
@@ -364,4 +614,10 @@ curl -s -u elastic:changeme "http://localhost:9200/_data_stream/logs-nginx.acces
 ```
 
 ### If a stream returns 404
-That source is **not ingesting yet**, even if Fleet shows the agent as healthy.
+That source is not ingesting yet, even if Fleet says the agent is healthy.
+
+---
+
+## 24. Credentials & Quick Reference
+
+Keep your existing credentials and quick command references here.
