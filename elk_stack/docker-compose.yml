@@ -111,20 +111,25 @@ services:
     restart: unless-stopped
     user: root
     privileged: true
-  # pid: host   ← REMOVED, causes Tini PID 1 warning
+    pid: host
     cap_add:
       - SYS_PTRACE
       - NET_ADMIN
       - NET_RAW
       - DAC_READ_SEARCH
       - SYS_RESOURCE
+      - SYS_ADMIN       # ← ADD
+      - SYS_MODULE
     environment:
       - FLEET_ENROLL=1
       - FLEET_URL=http://fleet-server:8220
       - FLEET_ENROLLMENT_TOKEN=${PROXY_ENROLLMENT_TOKEN}
       - FLEET_INSECURE=true
+      - ELASTIC_NETINFO=false
     volumes:
       - proxy-logs:/var/log/squid:ro
+      - /proc:/hostproc:ro        # ← ADD
+      - /sys/fs/cgroup:/hostcgroup:ro
     depends_on:
       fleet-server:
         condition: service_healthy    # ← waits for fleet-server to be ready
@@ -138,20 +143,25 @@ services:
     restart: unless-stopped
     user: root
     privileged: true
-  # pid: host   ← REMOVED
+    pid: host
     cap_add:
       - SYS_PTRACE
       - NET_ADMIN
       - NET_RAW
       - DAC_READ_SEARCH
       - SYS_RESOURCE
+      - SYS_ADMIN       # ← ADD
+      - SYS_MODULE
     environment:
       - FLEET_ENROLL=1
       - FLEET_URL=http://fleet-server:8220
       - FLEET_ENROLLMENT_TOKEN=${WEBSRV_ENROLLMENT_TOKEN}
       - FLEET_INSECURE=true
+      - ELASTIC_NETINFO=false
     volumes:
       - websrv-logs:/var/log/nginx:ro
+      - /proc:/hostproc:ro        # ← ADD
+      - /sys/fs/cgroup:/hostcgroup:ro
     depends_on:
       fleet-server:
         condition: service_healthy    # ← waits for fleet-server to be ready
