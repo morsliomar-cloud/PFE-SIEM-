@@ -1,2 +1,0 @@
-- pipeline.id: syslog
-  path.config: "/usr/share/logstash/pipeline/logstash.conf"
