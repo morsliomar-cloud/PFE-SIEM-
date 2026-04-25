@@ -3,7 +3,7 @@ outputs:
   default:
     type: elasticsearch
     hosts:
-      - http://es01:9200
+      - https://es01:9200
     service_token: "${FLEET_SERVER_SERVICE_TOKEN}"
 
 inputs:
@@ -16,8 +16,8 @@ inputs:
 
 fleet:
   enabled: true
-  url: "http://fleet-server:8220"
+  url: "https://fleet-server:8220"
   kibana:
     hosts:
-      - http://kibana01:5601
+      - https://kibana01:5601
     setup: true
