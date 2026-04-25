@@ -1,3 +1,2 @@
-# elk_stack/logstash/pipelines.yml
 - pipeline.id: syslog
   path.config: "/usr/share/logstash/pipeline/logstash.conf"
