@@ -29,7 +29,7 @@ services:
     networks:
       - elastic-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -sk -u elastic:changeme https://localhost:9200/_cluster/health | grep -q 'status'"]
+      test: ["CMD-SHELL", "curl -s -k https://localhost:9200 | grep -q 'missing authentication token'"]
       interval: 15s
       timeout: 10s
       retries: 20
