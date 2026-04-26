@@ -11,7 +11,7 @@ services:
       - xpack.security.http.ssl.enabled=true
       - xpack.security.http.ssl.certificate=certs/es01.crt
       - xpack.security.http.ssl.key=certs/es01.key
-      #- xpack.security.http.ssl.certificate_authorities=certs/elastic-ca.pem
+      - xpack.security.http.ssl.certificate_authorities=certs/elastic-ca.pem
       - xpack.security.transport.ssl.enabled=true
       - xpack.security.transport.ssl.certificate=certs/es01.crt
       - xpack.security.transport.ssl.key=certs/es01.key
@@ -29,7 +29,7 @@ services:
     networks:
       - elastic-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -k https://localhost:9200 | grep -q 'missing authentication token'"]
+      test: ["CMD-SHELL", "nc -z localhost 9300"]
       interval: 15s
       timeout: 10s
       retries: 20
@@ -52,6 +52,7 @@ services:
       - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=a7f3c1d2e4b5a6f7c8d9e0a1b2c3d4e5
       - XPACK_REPORTING_ENCRYPTIONKEY=b8e4d1c2f3a7b6c5d4e3f2a1b0c9d8e7
       - XPACK_SECURITY_ENCRYPTIONKEY=c9f5e2d3a4b7c6d5e4f3a2b1c0d9e8f7
+      - 'XPACK_FLEET_OUTPUTS=[{"id": "fleet-default-output", "name": "default", "is_default": true, "is_default_monitoring": true, "type": "elasticsearch", "hosts": ["https://es01:9200"], "config": {"ssl.certificate_authorities": ["/usr/share/elastic-agent/certs/elastic-ca.pem"]}}]'
     volumes:
       - ./certs:/usr/share/kibana/config/certs
     depends_on:
@@ -89,18 +90,24 @@ services:
       - FLEET_SERVER_ENABLE=1
       - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
       - FLEET_SERVER_SERVICE_TOKEN=${FLEET_SERVICE_TOKEN}
-      - FLEET_SERVER_ELASTICSEARCH_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
+      - FLEET_SERVER_ELASTICSEARCH_CA=/usr/share/elastic-agent/certs/elastic-ca.pem   # <--- ADD THIS LINE BACK!
       - FLEET_SERVER_HOST=0.0.0.0
       - FLEET_SERVER_PORT=8220
       - FLEET_SERVER_CERT=/usr/share/elastic-agent/certs/fleet-server.crt
       - FLEET_SERVER_CERT_KEY=/usr/share/elastic-agent/certs/fleet-server.key
       - KIBANA_HOST=http://kibana01:5601
       - KIBANA_FLEET_SETUP=1
-      - ELASTICSEARCH_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
-      - SSL_CERTIFICATE_AUTHORITIES=/usr/share/elastic-agent/certs/elastic-ca.pem
+      - FLEET_URL=https://fleet-server:8220
+      - FLEET_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
     volumes:
-      - fleet-server-state:/usr/share/elastic-agent/state
-      - ./certs:/usr/share/elastic-agent/certs
+      - ./certs:/usr/share/elastic-agent/certs:ro   # <--- Notice the ./ here
+      - fleet-server-data:/usr/share/elastic-agent/state/data
+      - fleet-server-logs:/var/log/elastic-agent
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /proc:/hostfs/proc:ro
+      - /:/hostfs:ro
+      - ./certs/elastic-ca.pem:/etc/ssl/certs/elastic-ca.pem:ro
     ports:
       - "0.0.0.0:8220:8220"
     depends_on:
@@ -131,15 +138,15 @@ services:
     environment:
       - FLEET_ENROLL=1
       - FLEET_URL=https://fleet-server:8220
-      - FLEET_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
       - FLEET_ENROLLMENT_TOKEN=${PROXY_ENROLLMENT_TOKEN}
-      - FLEET_INSECURE=true
+      - SSL_CERTIFICATE_AUTHORITIES=/usr/share/elastic-agent/certs/elastic-ca.pem
       - ELASTIC_NETINFO=false
     volumes:
       - proxy-logs:/var/log/squid:ro
       - /proc:/hostproc:ro
       - /sys/fs/cgroup:/hostcgroup:ro
       - ./certs:/usr/share/elastic-agent/certs:ro
+      - ./certs/elastic-ca.pem:/etc/ssl/certs/elastic-ca.pem:ro
     depends_on:
       fleet-server:
         condition: service_healthy
@@ -163,15 +170,15 @@ services:
     environment:
       - FLEET_ENROLL=1
       - FLEET_URL=https://fleet-server:8220
-      - FLEET_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
       - FLEET_ENROLLMENT_TOKEN=${WEBSRV_ENROLLMENT_TOKEN}
-      - FLEET_INSECURE=true
+      - SSL_CERTIFICATE_AUTHORITIES=/usr/share/elastic-agent/certs/elastic-ca.pem
       - ELASTIC_NETINFO=false
     volumes:
       - websrv-logs:/var/log/nginx:ro
       - /proc:/hostproc:ro
       - /sys/fs/cgroup:/hostcgroup:ro
       - ./certs:/usr/share/elastic-agent/certs:ro
+      - ./certs/elastic-ca.pem:/etc/ssl/certs/elastic-ca.pem:ro
     depends_on:
       fleet-server:
         condition: service_healthy
@@ -187,6 +194,10 @@ volumes:
     driver: local
   websrv-logs:
     driver: local
+  certs:
+  kibanadata:
+  fleet-server-data:   # <--- Add this
+  fleet-server-logs:
 
 networks:
   elastic-net:
