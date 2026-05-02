@@ -1,10 +1,16 @@
-version: "3.8"
-
 services:
 
   es01:
     image: docker.elastic.co/elasticsearch/elasticsearch-wolfi:9.1.3
     container_name: es01
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
@@ -17,7 +23,7 @@ services:
       - xpack.security.transport.ssl.key=certs/es01.key
       - xpack.security.transport.ssl.certificate_authorities=certs/elastic-ca.pem
       - xpack.security.transport.ssl.verification_mode=certificate
-      - ELASTIC_PASSWORD=changeme
+      - LOGSTASH_PASSWORD=${LOGSTASH_PASSWORD}
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
       - path.repo=/usr/share/elasticsearch/snapshots
     ports:
@@ -27,9 +33,9 @@ services:
       - ./snapshots:/usr/share/elasticsearch/snapshots
       - ./certs:/usr/share/elasticsearch/config/certs
     networks:
-      - elastic-net
+      - backend-net
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 9300"]
+      test: ["CMD-SHELL", "curl -sk -u elastic:${ELASTIC_PASSWORD} https://localhost:9200/_cluster/health | grep -q status"]
       interval: 15s
       timeout: 10s
       retries: 20
@@ -38,20 +44,22 @@ services:
   kibana01:
     image: docker.elastic.co/kibana/kibana-wolfi:9.1.3
     container_name: kibana01
+    restart: unless-stopped
     ports:
       - "0.0.0.0:5601:5601"
     environment:
       - ELASTICSEARCH_HOSTS=https://es01:9200
       - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=changeme
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
       - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/elastic-ca.pem
       - ELASTICSEARCH_SSL_VERIFICATIONMODE=certificate
+      - ELASTICSEARCH_REQUESTTIMEOUT=60000
       - XPACK_FLEET_ENABLED=true
       - XPACK_FLEET_AGENTS_ELASTICSEARCH_HOSTS=["https://es01:9200"]
       - XPACK_FLEET_AGENTS_FLEET_SERVER_HOSTS=["https://fleet-server:8220"]
-      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=a7f3c1d2e4b5a6f7c8d9e0a1b2c3d4e5
-      - XPACK_REPORTING_ENCRYPTIONKEY=b8e4d1c2f3a7b6c5d4e3f2a1b0c9d8e7
-      - XPACK_SECURITY_ENCRYPTIONKEY=c9f5e2d3a4b7c6d5e4f3a2b1c0d9e8f7
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${XPACK_ENCRYPTED_SAVED_OBJECTS_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${XPACK_REPORTING_KEY}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${XPACK_SECURITY_KEY}
       - 'XPACK_FLEET_OUTPUTS=[{"id": "fleet-default-output", "name": "default", "is_default": true, "is_default_monitoring": true, "type": "elasticsearch", "hosts": ["https://es01:9200"], "ca_trusted_fingerprint": "1DE4EDE8113BB77E41DA12D8774A17AF2A11D7DE72040F0210CA657DC38043AB"}]'
     volumes:
       - ./certs:/usr/share/kibana/config/certs
@@ -59,7 +67,7 @@ services:
       es01:
         condition: service_healthy
     networks:
-      - elastic-net
+      - backend-net
 
   logstash01:
     image: docker.elastic.co/logstash/logstash-wolfi:9.1.3
@@ -74,12 +82,12 @@ services:
       - ./certs:/usr/share/logstash/config/certs:ro
     environment:
       - "LS_JAVA_OPTS=-Xms512m -Xmx512m"
-      - "LOGSTASH_PASSWORD=${LOGSTASH_PASSWORD}"
+      - LOGSTASH_PASSWORD=${LOGSTASH_PASSWORD}
     depends_on:
       es01:
         condition: service_healthy
     networks:
-      - elastic-net
+      - backend-net
 
   fleet-server:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
@@ -90,7 +98,7 @@ services:
       - FLEET_SERVER_ENABLE=1
       - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
       - FLEET_SERVER_SERVICE_TOKEN=${FLEET_SERVICE_TOKEN}
-      - FLEET_SERVER_ELASTICSEARCH_CA=/usr/share/elastic-agent/certs/elastic-ca.pem   # <--- ADD THIS LINE BACK!
+      - FLEET_SERVER_ELASTICSEARCH_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
       - FLEET_SERVER_HOST=0.0.0.0
       - FLEET_SERVER_PORT=8220
       - FLEET_SERVER_CERT=/usr/share/elastic-agent/certs/fleet-server.crt
@@ -100,13 +108,15 @@ services:
       - FLEET_URL=https://fleet-server:8220
       - FLEET_CA=/usr/share/elastic-agent/certs/elastic-ca.pem
     volumes:
-      - ./certs:/usr/share/elastic-agent/certs:ro   # <--- Notice the ./ here
+      - ./certs:/usr/share/elastic-agent/certs:ro
       - fleet-server-data:/usr/share/elastic-agent/state/data
       - fleet-server-logs:/var/log/elastic-agent
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      # 4.4 FIX: replaced /:/hostfs:ro with specific paths only
       - /proc:/hostfs/proc:ro
-      - /:/hostfs:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /etc/hostname:/hostfs/etc/hostname:ro
+      - /etc/os-release:/hostfs/etc/os-release:ro
       - ./certs/elastic-ca.pem:/etc/ssl/certs/elastic-ca.pem:ro
     ports:
       - "0.0.0.0:8220:8220"
@@ -119,22 +129,24 @@ services:
       interval: 10s
       retries: 15
     networks:
-      - elastic-net
+      - frontend-net
+      - backend-net
 
   agent-proxy:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
     container_name: agent-proxy
     hostname: agent-proxy
     restart: unless-stopped
-    pid: host
+    # 4.3 FIX: removed pid:host, SYS_PTRACE, SYS_ADMIN, SYS_MODULE, SYS_RESOURCE
+    # 4.3 FIX: added cap_drop:ALL and no-new-privileges (deny-first posture)
     cap_add:
-      - SYS_PTRACE
-      - NET_ADMIN
-      - NET_RAW
-      - DAC_READ_SEARCH
-      - SYS_RESOURCE
-      - SYS_ADMIN
-      - SYS_MODULE
+      - NET_ADMIN        # network interface management
+      - NET_RAW          # raw packet access for network monitoring
+      - DAC_READ_SEARCH  # read log files regardless of ownership
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       - FLEET_ENROLL=1
       - FLEET_URL=https://fleet-server:8220
@@ -143,6 +155,7 @@ services:
       - ELASTIC_NETINFO=false
     volumes:
       - proxy-logs:/var/log/squid:ro
+      # 4.4 NOTE: /proc and cgroup kept — required by System integration policy
       - /proc:/hostproc:ro
       - /sys/fs/cgroup:/hostcgroup:ro
       - ./certs:/usr/share/elastic-agent/certs:ro
@@ -151,22 +164,23 @@ services:
       fleet-server:
         condition: service_healthy
     networks:
-      - elastic-net
+      - frontend-net
 
   agent-websrv:
     image: docker.elastic.co/elastic-agent/elastic-agent:9.1.3
     container_name: agent-websrv
     hostname: agent-websrv
     restart: unless-stopped
-    pid: host
+    # 4.3 FIX: removed pid:host, SYS_PTRACE, SYS_ADMIN, SYS_MODULE, SYS_RESOURCE
+    # 4.3 FIX: added cap_drop:ALL and no-new-privileges (deny-first posture)
     cap_add:
-      - SYS_PTRACE
-      - NET_ADMIN
-      - NET_RAW
-      - DAC_READ_SEARCH
-      - SYS_RESOURCE
-      - SYS_ADMIN
-      - SYS_MODULE
+      - NET_ADMIN        # network interface management
+      - NET_RAW          # raw packet access for network monitoring
+      - DAC_READ_SEARCH  # read log files regardless of ownership
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       - FLEET_ENROLL=1
       - FLEET_URL=https://fleet-server:8220
@@ -175,6 +189,7 @@ services:
       - ELASTIC_NETINFO=false
     volumes:
       - websrv-logs:/var/log/nginx:ro
+      # 4.4 NOTE: /proc and cgroup kept — required by System integration policy
       - /proc:/hostproc:ro
       - /sys/fs/cgroup:/hostcgroup:ro
       - ./certs:/usr/share/elastic-agent/certs:ro
@@ -183,12 +198,10 @@ services:
       fleet-server:
         condition: service_healthy
     networks:
-      - elastic-net
+      - frontend-net
 
 volumes:
   esdata:
-    driver: local
-  fleet-server-state:
     driver: local
   proxy-logs:
     driver: local
@@ -196,9 +209,12 @@ volumes:
     driver: local
   certs:
   kibanadata:
-  fleet-server-data:   # <--- Add this
+  fleet-server-data:
   fleet-server-logs:
+  # NOTE: fleet-server-state removed — was declared but never used
 
 networks:
-  elastic-net:
+  frontend-net:
+    driver: bridge
+  backend-net:
     driver: bridge
