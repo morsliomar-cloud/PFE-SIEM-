@@ -19,107 +19,7 @@
 | 🟢 LOW | 12 | Optimization backlog |
 | **TOTAL** | **60** | |
 
----
-
-## `elk_stack/scripts/` — File Reference
-
-> **Production posture:** All fake/dev-only scripts have been removed. Only real telemetry and operational utilities remain.
-
-### `scripts/setup/`
-
-#### `syslog_alert.sh` ✅ Keep
-Sends 10 minimal syslog test packets to `localhost:514` via `nc`, then queries `GET /syslog-{today}` on Elasticsearch to verify the pipeline is alive and indexing. Use this as a **manual smoke-test** after any Logstash restart or configuration change.
-
-> ⚠️ **Prerequisite:** This script only returns results after fix **1.2** (align Logstash output to `syslog-YYYY.MM.dd`). Until then it will always report zero docs even when the pipeline is working.
-
-**Note:** `run-elasticsearch.sh` has been **deleted**. It started a standalone Elasticsearch container with `xpack.security.enabled=false`, which was dangerous in a production environment and incompatible with `docker-compose.yml`.
-
----
-
-### `scripts/telemetry/`
-
-> **Note:** The two macOS scripts (`cyber_security_mvp.sh`, `syslog_mac.sh`) have been **deleted**. They were development artifacts for a platform not present in the CNAS lab, and produced fabricated metric counts rather than structured security events.
-
-#### `linux_telemetry.sh` ✅ Keep — schedule with cron
-Collects real Linux security indicators and ships them as RFC 3164 syslog UDP packets to the ELK stack on port 514. Supports Debian/Ubuntu (`/var/log/auth.log`) and RHEL/CentOS (`/var/log/secure`) with `journalctl` fallback.
-
-**Metrics collected:**
-- Failed login attempts (SSH brute force indicator)
-- Active TCP/UDP connections
-- Unique processes with network activity
-- New files in `/tmp` (malware drop indicator)
-- 1-minute load average (crypto-mining / DoS indicator)
-- Active SSH sessions
-- Sudo command count (privilege escalation indicator)
-- Listening ports (backdoor indicator)
-
-**Scheduling (required — see finding 8.3):**
-```bash
-# Add to crontab: crontab -e
-*/5 * * * * /path/to/elk_stack/scripts/telemetry/linux_telemetry.sh <ELK_HOST> 514 >> /var/log/siem-telemetry.log 2>&1
-```
-
-#### `windows_telemetry.ps1` ✅ Keep — schedule with Task Scheduler
-Collects real Windows security indicators and ships them as syslog UDP packets. Queries the Windows Security Event Log directly.
-
-**Metrics collected:**
-- Failed login attempts (Event ID 4625, last hour)
-- Active TCP connections via `Get-NetTCPConnection`
-- Processes with network activity
-- New files in `%TEMP%` (last hour)
-- Average CPU usage (crypto-mining / DoS indicator)
-
-**Scheduling (required — see finding 8.3):**
-```powershell
-# Run as Administrator in PowerShell
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-  -Argument "-NonInteractive -File C:\path\to\windows_telemetry.ps1 <ELK_HOST> 514"
-$trigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 5) -Once -At (Get-Date)
-Register-ScheduledTask -TaskName "SIEM-Telemetry" -Action $action -Trigger $trigger -RunLevel Highest
-```
-
-> ⚠️ **Timestamp fix (finding 6.2):** Change `Get-Date -Format "MMM dd HH:mm:ss"` to `Get-Date -Format "MMM  d HH:mm:ss"` (space-padded day) to comply with RFC 3164 and prevent `_grokparsefailure` on days 1–9 of each month.
-
----
-
 ## Domain 1 — Data Ingestion & Stream Integrity
-
-### 1.1 🔴 Pipeline File Identity Conflict
-| Field | Detail |
-|---|---|
-| **Status** | MISCONFIGURED |
-| **Finding** | `logstash/pipelines.yml` references `logstash.conf` as the active pipeline ID `syslog`. The README documents `ettx-attacks.conf` as the canonical syslog pipeline. No `ettx-attacks.conf` exists on disk. |
-| **Risk** | CRITICAL |
-| **Fix** | Canonicalize on one filename. Update `pipelines.yml` to reference `logstash.conf`, or rename the file. |
-
-```bash
-# Option A — keep current filename, fix pipelines.yml
-# In pipelines.yml, ensure: path.config: "/usr/share/logstash/pipeline/logstash.conf"
-docker compose restart logstash01
-curl http://localhost:9600/_node/pipelines?pretty
-```
-
----
-
-### 1.3 🟠 Orphaned Logstash Volume Mounts
-| Field | Detail |
-|---|---|
-| **Status** | MISCONFIGURED |
-| **Finding** | `docker-compose.yml` mounts `.logstash/ettx-input`, `.logstash/datasets`, `proxy-logs`, and `websrv-logs` into `logstash01`. No active pipeline reads from any of these paths. Dead weight. |
-| **Risk** | HIGH |
-| **Fix** | Remove from `logstash01.volumes`: `.logstash/ettx-input`, `.logstash/datasets`, `proxy-logs:/var/log/proxy:ro`, `websrv-logs:/var/log/websrv:ro`. Then `docker compose up -d --force-recreate logstash01`. |
-
----
-
-### 1.4 🟠 agent-proxy Hostname Mismatch
-| Field | Detail |
-|---|---|
-| **Status** | MISCONFIGURED |
-| **Finding** | README states `agent-proxy` should present as `PROXY-CNAS-KOLEA` to Fleet. `docker-compose.yml` sets `hostname: agent-proxy`. Same issue for `agent-websrv` vs `WEBSRV-CNAS-KOLEA`. |
-| **Risk** | HIGH |
-| **Fix** | In `docker-compose.yml` set `hostname: PROXY-CNAS-KOLEA` and `hostname: WEBSRV-CNAS-KOLEA`. Re-enroll: `docker compose up -d --force-recreate agent-proxy agent-websrv`. |
-
----
 
 ### 1.5 🟡 Nginx Data Stream Pending
 | Field | Detail |
@@ -128,26 +28,6 @@ curl http://localhost:9600/_node/pipelines?pretty
 | **Finding** | README §6 marks `logs-nginx.access-default` as Pending. `scripts/nginx/nginx.conf` has the `combined` log format fix applied but `elk_stack/docker-compose.cnas.yml` uses stock `nginx:latest` without this config. |
 | **Risk** | MEDIUM |
 | **Fix** | Mount corrected `nginx.conf` into `websrv-cnas` in `elk_stack/docker-compose.cnas.yml`. |
-
----
-
-### 1.7 🟠 Fleet Server Healthcheck Endpoint Unverified
-| Field | Detail |
-|---|---|
-| **Status** | UNCERTAIN |
-| **Finding** | `docker-compose.yml` fleet-server healthcheck uses `curl -s http://localhost:8220/api/status`. That endpoint belongs to Kibana, not Fleet Server. This may cause `depends_on: condition: service_healthy` to never be satisfied, blocking agent containers indefinitely. |
-| **Risk** | HIGH |
-| **Fix** | Replace healthcheck test with `CMD-SHELL, curl -sf http://localhost:8220 \|\| exit 1` and set `start_period: 90s`. |
-
----
-
-### 1.8 🟢 Unused fleet-server/elastic-agent.yml
-| Field | Detail |
-|---|---|
-| **Status** | INCOMPLETE |
-| **Finding** | `elk_stack/fleet-server/elastic-agent.yml` is never mounted into the fleet-server container. Fleet Server is configured entirely via environment variables. This file is orphaned documentation. |
-| **Risk** | LOW |
-| **Fix** | Delete the file and add a note in README: "fleet-server is configured via environment variables in docker-compose.yml, not via elastic-agent.yml." |
 
 ---
 
@@ -189,33 +69,6 @@ curl -u elastic:${ELASTIC_PASSWORD} -X PUT http://localhost:9200/_index_template
   }'
 ```
 
----
-
-### 2.2 🟠 Logstash Filter Produces No ECS Fields
-| Field | Detail |
-|---|---|
-| **Status** | MISCONFIGURED |
-| **Finding** | The filter in `logstash.conf` produces `syslog_hostname`, `syslog_program`, `syslog_pid` — none of which are ECS. Detection rules using `host.name`, `process.name`, `event.category` return zero results. |
-| **Risk** | HIGH |
-| **Fix** | Add after the existing `mutate` block: |
-
-```ruby
-mutate {
-  rename => {
-    "syslog_hostname" => "[host][name]"
-    "syslog_program"  => "[process][name]"
-    "syslog_pid"      => "[process][pid]"
-  }
-  add_field => {
-    "[event][kind]"     => "event"
-    "[event][category]" => "network"
-    "[ecs][version]"    => "8.11.0"
-  }
-}
-```
-
----
-
 ### 2.4 🟡 syslog_alert.sh Verification Script Checks Wrong Index
 | Field | Detail |
 |---|---|
@@ -223,13 +76,6 @@ mutate {
 | **Finding** | `syslog_alert.sh` checks `GET /syslog-{today}`. If Logstash routes to data streams (current state), this always returns zero docs — a dangerous false-negative. |
 | **Risk** | MEDIUM |
 | **Fix** | After applying fix 1.2 (route to `syslog-*`), this script works correctly. As a defensive measure, make the index check dynamic: `curl -s localhost:9200/_cat/indices/syslog-*?v`. |
-
----
-
-### 2.5 🟠 run-elasticsearch.sh — DELETED
-This script has been removed from the repository. It started a standalone Elasticsearch with `xpack.security.enabled=false`, which was incompatible with the production `docker-compose.yml` security configuration and posed a data corruption risk if run accidentally.
-
----
 
 ## Domain 3 — Indexing & Storage
 
