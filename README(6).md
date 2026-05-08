@@ -231,7 +231,7 @@ Real Nginx container generating access.log entries, shipped by `agent-websrv` to
 | Python 3 | 3.9+ |
 | `curl` | Included in Git Bash |
 
-> **VirtualBox Host-Only network prerequisite:** Before starting any VMs, verify that a Host-Only network at `10.10.10.1 / 255.255.255.0` exists in VirtualBox (File → Tools → Network Manager → Host-only Networks). Create it if missing. The VMs will not be able to reach Docker without this adapter.
+> **VirtualBox Host-Only network prerequisite:** Before starting any VMs, verify that a Host-Only network exists in VirtualBox (File → Tools → Network Manager → Host-only Networks). Create it if missing. The VMs will not be able to reach Docker without this adapter.
 
 ### Windows / Git Bash — mandatory setup
 
