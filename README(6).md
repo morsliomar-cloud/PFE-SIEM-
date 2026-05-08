@@ -64,7 +64,7 @@ A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNA
 │  ┌─ VirtualBox VMs ───────────────────────────────────────────────────┐    │
 │  │                                                                     │    │
 │  │  AD-CNAS-KOLEA (Windows Server 2025)                               │    │
-│  │    Elastic Agent → Fleet Server (10.10.10.1:8220)                  │    │
+│  │    Elastic Agent → Fleet Server (x.x.x.x:8220)                  │    │
 │  │    Real Windows Event Logs →                                        │    │
 │  │      logs-windows.sysmon_operational-default                       │    │
 │  │      logs-system.security-default                                  │    │
@@ -72,7 +72,7 @@ A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNA
 │  │      logs-windows.windows_defender-default                         │    │
 │  │                                                                     │    │
 │  │  WSUS-CNAS-KOLEA (Windows Server 2025)                             │    │
-│  │    Elastic Agent → Fleet Server (10.10.10.1:8220)                  │    │
+│  │    Elastic Agent → Fleet Server (x.x.x.x:8220)                  │    │
 │  │    Real Windows Event Logs → (same data streams as above)          │    │
 │  │                                                                     │    │
 │  └─────────────────────────────────────────────────────────────────────┘   │
