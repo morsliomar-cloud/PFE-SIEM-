@@ -212,7 +212,6 @@ Real Nginx container generating access.log entries, shipped by `agent-websrv` to
 | `logs-nginx.access-default` | ⚠️ Pending | Volume mounted, log format fix needed |
 | `logs-system.auth-default` | ❌ Not applicable | No rsyslog in minimal containers |
 | `logs-system.syslog-default` | ❌ Not applicable | Same reason |
-| `sysmon-*`, `network-cnas-*`, `proxy-cnas-*`, `auth-cnas-*` | ❌ Removed | ETTX pipeline deleted |
 
 > **All data streams show YELLOW status** — expected on a single-node Elasticsearch cluster (no replicas can be assigned). This is not an error.
 
