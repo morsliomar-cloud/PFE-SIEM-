@@ -213,8 +213,6 @@ Real Nginx container generating access.log entries, shipped by `agent-websrv` to
 | `logs-system.auth-default` | ❌ Not applicable | No rsyslog in minimal containers |
 | `logs-system.syslog-default` | ❌ Not applicable | Same reason |
 
-> **All data streams show YELLOW status** — expected on a single-node Elasticsearch cluster (no replicas can be assigned). This is not an error.
-
 > **Data streams are NOT plain indices.** `logs-windows.sysmon_operational-default` will not appear under Index Management → Indices. Find it at: Stack Management → Index Management → **Data Streams** tab.
 
 ---
