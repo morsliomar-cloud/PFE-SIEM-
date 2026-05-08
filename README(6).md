@@ -57,7 +57,7 @@ A fully containerised SIEM lab built on **ELK Stack 9.1.3**, simulating four CNA
 │  │  │(Nginx :80)  │                                                   │    │
 │  │  └─────────────┘                                                   │    │
 │  │                                                                     │    │
-│  │  VirtualBox Host-Only Adapter: 10.10.10.1  ◄── VMs connect here   │    │
+│  │  VirtualBox Host-Only Adapter: x.x.x.x  ◄── VMs connect here   │    │
 │  │                                                                     │    │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
