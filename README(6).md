@@ -127,8 +127,6 @@ Logstash listens on UDP/TCP port 514 to receive syslog from network devices. Thi
 |--------|-------------|-------|
 | Syslog UDP/TCP :514 | Network device syslog receiver | `syslog-*` |
 
-> **Note:** The EVTX-ATTACK-SAMPLES, CICIDS 2017, CICIDS Web Attacks, and Faker authentication pipeline has been fully removed. All Windows log collection is handled exclusively by Elastic Agent.
-
 ---
 
 ## 4. ECS Normalization — Core Requirement
