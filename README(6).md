@@ -232,16 +232,6 @@ Real Nginx container generating access.log entries, shipped by `agent-websrv` to
 | `curl` | Included in Git Bash |
 
 > **VirtualBox Host-Only network prerequisite:** Before starting any VMs, verify that a Host-Only network exists in VirtualBox (File → Tools → Network Manager → Host-only Networks). Create it if missing. The VMs will not be able to reach Docker without this adapter.
-
-### Windows / Git Bash — mandatory setup
-
-```bash
-echo 'export MSYS_NO_PATHCONV=1' >> ~/.bashrc
-source ~/.bashrc
-```
-
-> **Never use `/tmp` as a Docker volume target on Windows.** Use `/usr/share/logstash/ettx-input` and `/var/log/<service>` instead.
-
 ---
 
 ## 8. Repository Layout
