@@ -545,13 +545,6 @@ reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging"
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" `
         /v EnableModuleLogging /t REG_DWORD /d 1 /f
 ```
-
-### 12.6 Windows Server 2025 caveat — event ID filters silently ignored
-
-WS2025 has a known Event Log API limitation: filters configured in the Windows integration are dropped. **Workaround:** in Fleet → Windows integration, remove all event ID filters and let the agent collect everything.
-
-⚠️ Unfiltered collection on a busy AD DC produces hundreds of events per minute (4634, 4648, 4776). After enabling, immediately apply the ILM policy in [§15.1](#151-storage-hardening) and add explicit exclusions for the noisiest benign events.
-
 ---
 
 ## 13. Phase 6 — VirtualBox Networking
