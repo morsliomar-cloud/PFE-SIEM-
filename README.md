@@ -1,6 +1,6 @@
-# PFE-SIEM — ELK Stack 9.1.3 · CNAS Lab
+# PFE-SIEM — ELK Stack · CNAS Lab
 
-A containerised SIEM lab built on **Elastic Stack 9.1.3**, simulating four CNAS agency nodes (AD, WSUS, Proxy, WebSrv), shipping live telemetry through Elastic Agent and Logstash, and running real-time attack detection via Elastic Security — all normalised to the **Elastic Common Schema (ECS)** and secured end-to-end with TLS.
+A containerised SIEM lab built on **Elastic Stack**, simulating four CNAS agency nodes (AD, WSUS, Proxy, WebSrv), shipping live telemetry through Elastic Agent and Logstash, and running real-time attack detection via Elastic Security — all normalised to the **Elastic Common Schema (ECS)** and secured end-to-end with TLS.
 
 > Built as a final-year project (PFE) to demonstrate a production-grade SIEM workflow on a single host. Detection rules written against this lab fire unchanged on real CNAS infrastructure — the only thing that changes is the data source.
 
@@ -52,19 +52,22 @@ A containerised SIEM lab built on **Elastic Stack 9.1.3**, simulating four CNAS 
 
 ```
 ┌───────────────────────────────── HOST PC ─────────────────────────────────┐
-│                                                                            │
-│  Docker Desktop (WSL2)                                                     │
+│                                                                           │
+│  Docker Desktop (WSL2) :                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────────────┐   │
 │  │     es01     │  │   kibana01   │  │           logstash01           │   │
 │  │  HTTPS :9200 │  │     :5601    │  │   syslog UDP/TCP :514 · :9600  │   │
 │  └──────────────┘  └──────────────┘  └────────────────────────────────┘   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │ fleet-server │  │ proxy-cnas   │  │ websrv-cnas  │  │   agent-*    │   │
-│  │ HTTPS :8220  │  │ Squid :3128  │  │  Nginx :80   │  │   (Linux)    │   │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
-│                                                                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   ┌───────────┐     │
+│  │ fleet-server │  │ proxy-cnas   │  │ websrv-cnas  │   │agent-     │     │
+│  │ HTTPS :8220  │  │ Squid :3128  │  │  Nginx :80   │   │websrv     │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘   └───────────┘     │
+│   ┌──────────┐                                                            │
+│   │agent-    │                                                            │  
+│   │proxy     │                                                            │
+│   └──────────┘                                                            │
 │  VirtualBox Host-Only Adapter: 10.10.10.1   ◄──── VMs reach Docker here   │
-└────────────────────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────── VirtualBox VMs ──────────────────────────────┐
 │                                                                            │
