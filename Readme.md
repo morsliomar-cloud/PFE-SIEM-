@@ -794,69 +794,121 @@ Without these subcategories enabled, the Windows Security log will not contain t
 Run the entire block as Administrator on each VM (AD and WSUS):
 
 ```cmd
+@echo off
 :: ── Account Logon ── 4768/4769/4776
-auditpol /set /subcategory:"Credential Validation"             /success:enable /failure:enable
-auditpol /set /subcategory:"Kerberos Authentication Service"   /success:enable /failure:enable
-auditpol /set /subcategory:"Kerberos Service Ticket Operations" /success:enable /failure:enable
-auditpol /set /subcategory:"Other Account Logon Events"        /success:enable /failure:enable
+:: Validation des informations d'identification
+auditpol /set /subcategory:"{0CCE923F-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Service d'authentification Kerberos
+auditpol /set /subcategory:"{0CCE9242-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Opérations de ticket du service Kerberos
+auditpol /set /subcategory:"{0CCE9240-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Autres événements d'ouverture de session
+auditpol /set /subcategory:"{0CCE9241-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
 
 :: ── Account Management ── 4720-4738, 4741, 4781
-auditpol /set /subcategory:"User Account Management"           /success:enable /failure:enable
-auditpol /set /subcategory:"Computer Account Management"       /success:enable /failure:enable
-auditpol /set /subcategory:"Security Group Management"         /success:enable /failure:enable
-auditpol /set /subcategory:"Distribution Group Management"     /success:enable /failure:enable
-auditpol /set /subcategory:"Other Account Management Events"   /success:enable /failure:enable
+:: Gestion des comptes d'utilisateur
+auditpol /set /subcategory:"{0CCE9235-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Gestion des comptes d'ordinateur
+auditpol /set /subcategory:"{0CCE9236-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Gestion des groupes de sécurité
+auditpol /set /subcategory:"{0CCE9237-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Gestion des groupes de distribution
+auditpol /set /subcategory:"{0CCE9238-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Autres événements de gestion des comptes
+auditpol /set /subcategory:"{0CCE923A-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
 
 :: ── Detailed Tracking ── 4688/4689/4703
-auditpol /set /subcategory:"Process Creation"                  /success:enable /failure:enable
-auditpol /set /subcategory:"Process Termination"               /success:enable
-auditpol /set /subcategory:"DPAPI Activity"                    /success:enable /failure:enable
-auditpol /set /subcategory:"RPC Events"                        /success:enable /failure:enable
-auditpol /set /subcategory:"Token Right Adjusted Events"       /success:enable
+:: Création du processus
+auditpol /set /subcategory:"{0CCE922B-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Fin du processus (success only — failure impossible)
+auditpol /set /subcategory:"{0CCE922C-69AE-11D9-BED3-505054503030}" /success:enable
+:: Activité DPAPI
+auditpol /set /subcategory:"{0CCE922D-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Événements RPC
+auditpol /set /subcategory:"{0CCE922E-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Événements de jeton ajustés à droite (success only)
+auditpol /set /subcategory:"{0CCE924A-69AE-11D9-BED3-505054503030}" /success:enable
 
 :: ── DS Access (DC only) ── 4662 DCSync, 5136 AD object change
-auditpol /set /subcategory:"Directory Service Access"          /success:enable /failure:enable
-auditpol /set /subcategory:"Directory Service Changes"         /success:enable /failure:enable
-auditpol /set /subcategory:"Directory Service Replication"     /success:enable
+:: Accès au service d'annuaire
+auditpol /set /subcategory:"{0CCE923B-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Modification du service d'annuaire
+auditpol /set /subcategory:"{0CCE923C-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Réplication du service d'annuaire (success only)
+auditpol /set /subcategory:"{0CCE923D-69AE-11D9-BED3-505054503030}" /success:enable
 
 :: ── Logon/Logoff ── 4624/4625/4634/4647/4672/4740
-auditpol /set /subcategory:"Logon"                             /success:enable /failure:enable
-auditpol /set /subcategory:"Logoff"                            /success:enable
-auditpol /set /subcategory:"Account Lockout"                   /success:enable /failure:enable
-auditpol /set /subcategory:"Special Logon"                     /success:enable /failure:enable
-auditpol /set /subcategory:"Group Membership"                  /success:enable
-auditpol /set /subcategory:"Other Logon/Logoff Events"         /success:enable /failure:enable
+:: Ouvrir la session
+auditpol /set /subcategory:"{0CCE9215-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Fermer la session (success only)
+auditpol /set /subcategory:"{0CCE9216-69AE-11D9-BED3-505054503030}" /success:enable
+:: Verrouillage du compte
+auditpol /set /subcategory:"{0CCE9217-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Ouverture de session spéciale
+auditpol /set /subcategory:"{0CCE921B-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Appartenance à un groupe (success only)
+auditpol /set /subcategory:"{0CCE9249-69AE-11D9-BED3-505054503030}" /success:enable
+:: Autres événements d'ouverture/fermeture de session
+auditpol /set /subcategory:"{0CCE921C-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
 
 :: ── Object Access ── 4656/4663/5140/5145
-auditpol /set /subcategory:"File System"                       /success:enable /failure:enable
-auditpol /set /subcategory:"Registry"                          /success:enable /failure:enable
-auditpol /set /subcategory:"Removable Storage"                 /success:enable /failure:enable
-auditpol /set /subcategory:"File Share"                        /success:enable /failure:enable
-auditpol /set /subcategory:"Detailed File Share"               /success:enable /failure:enable
-auditpol /set /subcategory:"SAM"                               /success:enable /failure:enable
-auditpol /set /subcategory:"Kernel Object"                     /success:enable /failure:enable
-auditpol /set /subcategory:"Handle Manipulation"               /success:enable /failure:enable
-auditpol /set /subcategory:"Other Object Access Events"        /success:enable /failure:enable
-auditpol /set /subcategory:"Filtering Platform Connection"     /success:enable /failure:enable
+:: Système de fichiers
+auditpol /set /subcategory:"{0CCE921D-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Registre
+auditpol /set /subcategory:"{0CCE921E-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Stockage amovible
+auditpol /set /subcategory:"{0CCE9245-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Partage de fichiers
+auditpol /set /subcategory:"{0CCE9224-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Partage de fichiers détaillé
+auditpol /set /subcategory:"{0CCE9244-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: SAM
+auditpol /set /subcategory:"{0CCE9220-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Objet de noyau
+auditpol /set /subcategory:"{0CCE921F-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Manipulation de handle
+auditpol /set /subcategory:"{0CCE9223-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Autres événements d'accès à l'objet
+auditpol /set /subcategory:"{0CCE9227-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Connexion de la plateforme de filtrage
+auditpol /set /subcategory:"{0CCE9226-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
 
 :: ── Policy Change ── 4719 audit-policy tampering, 4670 perms
-auditpol /set /subcategory:"Audit Policy Change"               /success:enable /failure:enable
-auditpol /set /subcategory:"Authentication Policy Change"      /success:enable /failure:enable
-auditpol /set /subcategory:"Authorization Policy Change"       /success:enable /failure:enable
-auditpol /set /subcategory:"MPSSVC Rule-Level Policy Change"   /success:enable /failure:enable
-auditpol /set /subcategory:"Filtering Platform Policy Change"  /success:enable /failure:enable
-auditpol /set /subcategory:"Other Policy Change Events"        /failure:enable
+:: Modification de la stratégie d'audit
+auditpol /set /subcategory:"{0CCE922F-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Modification de la stratégie d'authentification
+auditpol /set /subcategory:"{0CCE9230-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Modification de la stratégie d'autorisation
+auditpol /set /subcategory:"{0CCE9231-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Modification de la stratégie de niveau règle MPSSVC
+auditpol /set /subcategory:"{0CCE9232-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Modification de la stratégie de plateforme de filtrage
+auditpol /set /subcategory:"{0CCE9233-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Autres événements de modification de stratégie (failure only)
+auditpol /set /subcategory:"{0CCE9234-69AE-11D9-BED3-505054503030}" /failure:enable
 
 :: ── Privilege Use ── 4672/4673/4674
-auditpol /set /subcategory:"Sensitive Privilege Use"           /success:enable /failure:enable
-auditpol /set /subcategory:"Other Privilege Use Events"        /success:enable /failure:enable
+:: Utilisation de privilèges sensibles
+auditpol /set /subcategory:"{0CCE9228-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Autres événements d'utilisation de privilèges
+auditpol /set /subcategory:"{0CCE922A-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: NOTE: "Utilisation de privilèges non sensibles" {0CCE9229-...} laissé désactivé
+::       (volume extrême, valeur de détection quasi-nulle)
 
 :: ── System ── 4608/4609/4616/5478
-auditpol /set /subcategory:"Security State Change"             /success:enable /failure:enable
-auditpol /set /subcategory:"Security System Extension"         /success:enable /failure:enable
-auditpol /set /subcategory:"System Integrity"                  /success:enable /failure:enable
-auditpol /set /subcategory:"IPsec Driver"                      /success:enable /failure:enable
-auditpol /set /subcategory:"Other System Events"               /failure:enable
+:: Modification de l'état de la sécurité
+auditpol /set /subcategory:"{0CCE9210-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Extension système de sécurité
+auditpol /set /subcategory:"{0CCE9211-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Intégrité du système
+auditpol /set /subcategory:"{0CCE9212-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Pilote IPSEC
+auditpol /set /subcategory:"{0CCE9213-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
+:: Autres événements système (failure only)
+auditpol /set /subcategory:"{0CCE9214-69AE-11D9-BED3-505054503030}" /failure:enable
+
+echo.
+echo === Verification (toute ligne affichee doit montrer Succes/Echec/Reussite) ===
 
 :: ── Verify
 auditpol /get /category:* | findstr /v "No Auditing"
