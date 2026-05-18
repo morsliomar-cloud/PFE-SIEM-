@@ -922,35 +922,70 @@ Without these registry keys, `logs-windows.powershell_operational-default` will 
 
 Run as Administrator on each Windows VM:
 
-```powershell
-# ── Script Block Logging (EID 4104) — the main signal for malicious PS
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" `
-        /v EnableScriptBlockLogging /t REG_DWORD /d 1 /f
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" `
-        /v EnableScriptBlockInvocationLogging /t REG_DWORD /d 1 /f
+```cmd
+@echo off
+echo === Configuring PowerShell logging (all layers) ===
+echo.
 
-# ── Module Logging (EID 4103) — needs both the parent toggle and a wildcard
-#    in the ModuleNames child key, otherwise nothing gets logged
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" `
-        /v EnableModuleLogging /t REG_DWORD /d 1 /f
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames" `
-        /v "*" /t REG_SZ /d "*" /f
+:: ──────────────────────────────────────────────────────────────────────────
+:: Block 1 — Windows PowerShell 5.x (built into Windows Server 2025)
+:: ──────────────────────────────────────────────────────────────────────────
 
-# ── Transcription — full session capture to disk (separate from event log)
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" `
-        /v EnableTranscripting /t REG_DWORD /d 1 /f
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" `
-        /v EnableInvocationHeader /t REG_DWORD /d 1 /f
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" `
-        /v OutputDirectory /t REG_SZ /d "C:\PSTranscripts" /f
+:: --- Script Block Logging (EID 4104 = compiled script content) ---
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1 /f
+:: Also log invocation start/stop (EID 4105/4106) — verbose, but useful for timeline reconstruction
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" /v EnableScriptBlockInvocationLogging /t REG_DWORD /d 1 /f
 
-# ── Increase the Operational PowerShell channel to 1 GB so 4104 events
-#    aren't rotated out before the agent ships them
+:: --- Module Logging (EID 4103 = pipeline execution details, parameters bound) ---
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" /v EnableModuleLogging /t REG_DWORD /d 1 /f
+:: Wildcard required — without this child key, EnableModuleLogging=1 does NOTHING
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames" /v "*" /t REG_SZ /d "*" /f
+
+:: --- Transcription (full session capture to disk, separate from event log) ---
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" /v EnableTranscripting /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" /v EnableInvocationHeader /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" /v OutputDirectory /t REG_SZ /d "C:\PSTranscripts" /f
+:: Create the directory and lock it down (only Administrators + SYSTEM)
+mkdir "C:\PSTranscripts" 2>nul
+icacls "C:\PSTranscripts" /inheritance:r /grant:r "BUILTIN\Administrators:(OI)(CI)F" "NT AUTHORITY\SYSTEM:(OI)(CI)F" >nul
+
+:: ──────────────────────────────────────────────────────────────────────────
+:: Block 2 — PowerShell 7 Core (separate policy tree)
+:: Reg keys are written regardless — they only matter if PS7 is installed.
+:: If you never install PS7, these are dormant and harmless.
+:: ──────────────────────────────────────────────────────────────────────────
+
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\ScriptBlockLogging" /v EnableScriptBlockLogging /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\ScriptBlockLogging" /v EnableScriptBlockInvocationLogging /t REG_DWORD /d 1 /f
+
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\ModuleLogging" /v EnableModuleLogging /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\ModuleLogging\ModuleNames" /v "*" /t REG_SZ /d "*" /f
+
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\Transcription" /v EnableTranscripting /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\Transcription" /v EnableInvocationHeader /t REG_DWORD /d 1 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\PowerShellCore\Transcription" /v OutputDirectory /t REG_SZ /d "C:\PSTranscripts" /f
+
+:: ──────────────────────────────────────────────────────────────────────────
+:: Block 3 — Event log channel sizing (1 GB each)
+:: Critical: without this, 4104 events on a busy host rotate out before
+:: the Elastic agent ships them.
+:: ──────────────────────────────────────────────────────────────────────────
+
+:: PowerShell 5 Operational — primary detection target
 wevtutil sl Microsoft-Windows-PowerShell/Operational /ms:1073741824
 
-# ── Verify
-Get-WinEvent -ListLog Microsoft-Windows-PowerShell/Operational `
-  | Select LogName, IsEnabled, MaximumSizeInBytes
+:: Windows PowerShell classic — EID 400/403/600/800 land here, NOT in Operational
+wevtutil sl "Windows PowerShell" /ms:1073741824
+
+:: PowerShell 7 Operational — only exists if PS7 is installed; suppress error if not
+wevtutil sl PowerShellCore/Operational /ms:1073741824 2>nul && (
+    echo [OK] PowerShellCore/Operational sized to 1 GB
+) || (
+    echo [SKIP] PowerShellCore/Operational not present ^(PowerShell 7 not installed^)
+)
+
+echo.
+echo === Done. Run verification block below from PowerShell ^(as Admin^) ===
 ```
 
 ### 13.6 Windows Server 2025 caveat — event ID filters silently ignored
